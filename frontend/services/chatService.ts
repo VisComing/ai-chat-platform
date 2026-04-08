@@ -17,11 +17,16 @@ class ChatService {
     return headers
   }
 
+  /**
+   * 发送消息并订阅 SSE 流
+   *
+   * 返回 taskId 用于恢复订阅
+   */
   async streamChat(
     request: Partial<ChatRequest>,
     onChunk: (chunk: StreamChunk) => void,
     useAgent: boolean = true
-  ): Promise<void> {
+  ): Promise<{ taskId: string | null }> {
     // Cancel any existing stream
     this.abortStream()
 
@@ -42,6 +47,8 @@ class ChatService {
     // Unified endpoint - useAgent parameter controls the mode
     const endpoint = '/chat/stream'
     if (DEBUG) console.log('[ChatService] useAgent:', useAgent, 'endpoint:', endpoint)
+
+    let currentTaskId: string | null = null
 
     try {
       const response = await fetch(`${apiClient.getBaseURL()}${endpoint}`, {
@@ -89,7 +96,7 @@ class ChatService {
                   if (data.type === 'complete') {
                     onChunk(data)
                     receivedComplete = true
-                    return
+                    return { taskId: currentTaskId }
                   }
                   onChunk(data)
                 } catch (e) {
@@ -123,6 +130,13 @@ class ChatService {
             try {
               const data = JSON.parse(dataStr)
 
+              // Handle task event - store taskId for resumption
+              if (data.taskId && !data.type) {
+                currentTaskId = data.taskId
+                if (DEBUG) console.log('[ChatService] Task created:', currentTaskId)
+                continue
+              }
+
               // Handle session event (has sessionId but no type)
               if (data.sessionId && !data.type) {
                 onChunk({ type: 'session', sessionId: data.sessionId })
@@ -153,7 +167,7 @@ class ChatService {
 
               if (chunk.type === 'complete') {
                 receivedComplete = true
-                return
+                return { taskId: currentTaskId }
               }
             } catch (e) {
               if (e instanceof Error && e.message !== '发生错误') {
@@ -168,10 +182,135 @@ class ChatService {
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         // Request was cancelled
+        return { taskId: currentTaskId }
+      }
+      throw error
+    }
+
+    return { taskId: currentTaskId }
+  }
+
+  /**
+   * 订阅正在运行的任务
+   *
+   * 用于刷新页面后恢复 SSE 流
+   */
+  async subscribeToTask(
+    taskId: string,
+    messageId: string,
+    onChunk: (chunk: StreamChunk) => void
+  ): Promise<void> {
+    // Cancel any existing stream
+    this.abortStream()
+
+    // Create new abort controller
+    abortController = new AbortController()
+    const signal = abortController.signal
+
+    const token = useAuthStore.getState().accessToken
+    const headers: Record<string, string> = {}
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+
+    if (DEBUG) console.log('[ChatService] Subscribing to task:', taskId)
+
+    try {
+      const response = await fetch(
+        `${apiClient.getBaseURL()}/chat/tasks/${taskId}/subscribe`,
+        { headers, signal }
+      )
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || error.message || `HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('无法读取响应')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) continue
+          if (line.startsWith('data:')) {
+            const dataStr = line.slice(5).trim()
+            try {
+              const data = JSON.parse(dataStr)
+
+              // Handle resumed event
+              if (data.type === 'resumed') {
+                if (DEBUG) console.log('[ChatService] Resumed task:', taskId)
+                continue
+              }
+
+              // Handle heartbeat
+              if (data.type === 'heartbeat' || dataStr === '{}') {
+                continue
+              }
+
+              const chunk = data as StreamChunk
+
+              if (chunk.type === 'error') {
+                throw new Error(chunk.content || '发生错误')
+              } else {
+                onChunk(chunk)
+              }
+
+              if (chunk.type === 'complete') {
+                return
+              }
+            } catch (e) {
+              if (e instanceof Error && !e.message.includes('发生错误')) {
+                // Ignore parse errors
+              } else {
+                throw e
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
         return
       }
       throw error
     }
+  }
+
+  /**
+   * 检查会话中是否有正在运行的任务
+   */
+  async getRunningTask(sessionId: string): Promise<{ taskId: string; messageId: string; status: string } | null> {
+    const response = await apiClient.get<{ success: boolean; data: { taskId: string; messageId: string; status: string } | null }>(
+      `/chat/sessions/${sessionId}/running-task`,
+      { headers: this.getHeaders() }
+    )
+    return response.data
+  }
+
+  /**
+   * 取消任务
+   */
+  async cancelTask(taskId: string): Promise<void> {
+    await apiClient.post(
+      `/chat/tasks/${taskId}/cancel`,
+      {},
+      { headers: this.getHeaders() }
+    )
+    this.abortStream()
   }
 
   abortStream(): void {

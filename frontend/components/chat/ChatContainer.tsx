@@ -56,6 +56,27 @@ export function ChatContainer({ className }: ChatContainerProps) {
     }
   }, [currentSessionId, setCurrentSession])
 
+  // Resume streaming session after page refresh
+  React.useEffect(() => {
+    const resumeIfNeeded = async () => {
+      if (!currentSessionId || isInitializing) return
+
+      // Check if there's a streaming message that needs to be resumed
+      const messages = useChatStore.getState().messagesBySession[currentSessionId] || []
+      const streamingMessage = messages.find(m => m.status === 'streaming' && m.role === 'assistant')
+
+      if (streamingMessage) {
+        console.log('[ChatContainer] Found streaming message, attempting to resume...')
+        const resumed = await useChatStore.getState().resumeSession(currentSessionId)
+        if (resumed) {
+          toast.success('已恢复之前的对话')
+        }
+      }
+    }
+
+    resumeIfNeeded()
+  }, [currentSessionId, isInitializing])
+
   // Helper for safe localStorage access
   const safeLocalStorage = {
     getItem: (key: string): string | null => {

@@ -9,6 +9,7 @@ interface ChatState {
   // Store messages by sessionId
   messagesBySession: Record<string, Message[]>
   currentSessionId: string | null
+  currentTaskId: string | null  // 当前运行中的任务 ID
   isLoading: boolean
   streamingMessageId: string | null
   error: string | null
@@ -30,6 +31,7 @@ interface ChatState {
   setUseAgent: (useAgent: boolean) => void
   setEnableThinking: (enable: boolean) => void
   setOnSessionCreated: (callback: (sessionId: string) => void) => void
+  resumeSession: (sessionId: string) => Promise<boolean> // 恢复会话（刷新后）
 }
 
 export const useChatStore = create<ChatState>()(
@@ -37,6 +39,7 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       messagesBySession: {},
       currentSessionId: null,
+      currentTaskId: null,
       isLoading: false,
       streamingMessageId: null,
       error: null,
@@ -55,7 +58,7 @@ export const useChatStore = create<ChatState>()(
         const { messagesBySession, currentSessionId, selectedModel, useAgent } = get()
         let sessionId = request.sessionId || currentSessionId || 'default'
         const currentMessages = messagesBySession[sessionId] || []
-        
+
         // Create user message
         const userMessage: Message = {
           id: generateId(),
@@ -91,7 +94,7 @@ export const useChatStore = create<ChatState>()(
         try {
           // Stream response (use Agent endpoint if enabled)
           console.log('[ChatStore] sendMessage - useAgent:', useAgent, 'selectedModel:', selectedModel)
-          await chatService.streamChat(
+          const { taskId } = await chatService.streamChat(
             {
               ...request,
               sessionId,
@@ -100,6 +103,12 @@ export const useChatStore = create<ChatState>()(
             (chunk: StreamChunk) => {
               const state = get()
               const sessionMessages = state.messagesBySession[sessionId] || []
+
+              // Handle task event
+              if (chunk.type === 'task' && chunk.taskId) {
+                set({ currentTaskId: chunk.taskId })
+                return
+              }
 
               // Handle session event
               if (chunk.type === 'session' && chunk.sessionId) {
@@ -248,6 +257,7 @@ export const useChatStore = create<ChatState>()(
                 set({
                   isLoading: false,
                   streamingMessageId: null,
+                  currentTaskId: null,
                   messagesBySession: {
                     ...currentState.messagesBySession,
                     [sessionId]: latestSessionMessages.map((msg) =>
@@ -272,6 +282,7 @@ export const useChatStore = create<ChatState>()(
                 set({
                   isLoading: false,
                   streamingMessageId: null,
+                  currentTaskId: null,
                   error: chunk.content,
                   messagesBySession: {
                     ...state.messagesBySession,
@@ -290,10 +301,16 @@ export const useChatStore = create<ChatState>()(
             },
             useAgent  // Pass Agent mode flag
           )
+
+          // Store taskId
+          if (taskId) {
+            set({ currentTaskId: taskId })
+          }
         } catch (error) {
           set({
             isLoading: false,
             streamingMessageId: null,
+            currentTaskId: null,
             error: error instanceof Error ? error.message : '发送失败',
           })
         }
@@ -303,13 +320,20 @@ export const useChatStore = create<ChatState>()(
         const state = get()
         const sessionId = state.currentSessionId
         if (!sessionId) return
-        
+
         const sessionMessages = state.messagesBySession[sessionId] || []
-        chatService.abortStream()
-        
+
+        // Cancel task if exists
+        if (state.currentTaskId) {
+          chatService.cancelTask(state.currentTaskId).catch(console.error)
+        } else {
+          chatService.abortStream()
+        }
+
         set({
           isLoading: false,
           streamingMessageId: null,
+          currentTaskId: null,
           messagesBySession: {
             ...state.messagesBySession,
             [sessionId]: sessionMessages.map((msg) =>
@@ -325,12 +349,12 @@ export const useChatStore = create<ChatState>()(
         const state = get()
         const sessionId = state.currentSessionId
         if (!sessionId) return
-        
+
         const messages = state.messagesBySession[sessionId] || []
         const messageIndex = messages.findIndex((m) => m.id === messageId)
-        
+
         if (messageIndex <= 0) return
-        
+
         const userMessage = messages[messageIndex - 1]
         if (userMessage.role !== 'user') return
 
@@ -352,7 +376,7 @@ export const useChatStore = create<ChatState>()(
         const state = get()
         const sessionId = state.currentSessionId
         if (!sessionId) return
-        
+
         const messages = state.messagesBySession[sessionId] || []
         set({
           messagesBySession: {
@@ -366,7 +390,7 @@ export const useChatStore = create<ChatState>()(
         const state = get()
         const sessionId = state.currentSessionId
         if (!sessionId) return
-        
+
         set({
           messagesBySession: {
             ...state.messagesBySession,
@@ -374,6 +398,7 @@ export const useChatStore = create<ChatState>()(
           },
           isLoading: false,
           streamingMessageId: null,
+          currentTaskId: null,
           error: null,
         })
       },
@@ -418,6 +443,191 @@ export const useChatStore = create<ChatState>()(
       setOnSessionCreated: (callback: (sessionId: string) => void) => {
         set({ onSessionCreated: callback })
       },
+
+      resumeSession: async (sessionId: string): Promise<boolean> => {
+        /**
+         * 恢复会话（刷新页面后）
+         *
+         * 1. 检查是否有正在运行的任务
+         * 2. 如果有，重新订阅 SSE
+         * 3. 继续接收消息
+         */
+        try {
+          console.log('[ChatStore] Checking for running task in session:', sessionId)
+
+          // 先加载已有的消息
+          await get().loadMessages(sessionId)
+
+          // 检查是否有 streaming 状态的消息
+          const messages = get().messagesBySession[sessionId] || []
+          const streamingMessage = messages.find(m => m.status === 'streaming' && m.role === 'assistant')
+
+          if (!streamingMessage) {
+            console.log('[ChatStore] No streaming message found')
+            return false
+          }
+
+          // 检查是否有正在运行的任务
+          const runningTask = await chatService.getRunningTask(sessionId)
+
+          if (!runningTask) {
+            console.log('[ChatStore] No running task found')
+            // 没有运行中的任务，将 streaming 消息标记为 cancelled
+            set({
+              messagesBySession: {
+                ...get().messagesBySession,
+                [sessionId]: messages.map(m =>
+                  m.id === streamingMessage.id
+                    ? { ...m, status: 'cancelled' }
+                    : m
+                ),
+              },
+            })
+            return false
+          }
+
+          console.log('[ChatStore] Found running task:', runningTask.taskId)
+
+          // 设置状态
+          set({
+            isLoading: true,
+            streamingMessageId: streamingMessage.id,
+            currentTaskId: runningTask.taskId,
+          })
+
+          // 重新订阅
+          await chatService.subscribeToTask(
+            runningTask.taskId,
+            streamingMessage.id,
+            (chunk: StreamChunk) => {
+              const state = get()
+              const sessionMessages = state.messagesBySession[sessionId] || []
+
+              if (chunk.type === 'text' && state.streamingMessageId) {
+                set({
+                  messagesBySession: {
+                    ...state.messagesBySession,
+                    [sessionId]: sessionMessages.map((msg) =>
+                      msg.id === state.streamingMessageId
+                        ? {
+                            ...msg,
+                            content: {
+                              type: 'text',
+                              text: (msg.content.type === 'text' ? msg.content.text : '') + chunk.content,
+                            },
+                            updatedAt: new Date(),
+                          }
+                        : msg
+                    ),
+                  },
+                })
+              } else if (chunk.type === 'thinking' && state.streamingMessageId) {
+                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
+                const existingThinking = currentMsg?.metadata?.thinking || ''
+
+                const newThinking = chunk.content
+                  ? existingThinking + chunk.content
+                  : (chunk.status || '正在思考...')
+
+                set({
+                  messagesBySession: {
+                    ...state.messagesBySession,
+                    [sessionId]: sessionMessages.map((msg) =>
+                      msg.id === state.streamingMessageId
+                        ? {
+                            ...msg,
+                            metadata: {
+                              ...msg.metadata,
+                              thinking: newThinking,
+                              isDeepThinking: !!chunk.content,
+                            },
+                          }
+                        : msg
+                    ),
+                  },
+                })
+              } else if (chunk.type === 'tool_call' && state.streamingMessageId) {
+                const toolName = chunk.toolName || 'unknown'
+                const queryValue = chunk.toolArgs?.query
+                const searchQuery = typeof queryValue === 'string' ? queryValue : ''
+
+                set({
+                  messagesBySession: {
+                    ...state.messagesBySession,
+                    [sessionId]: sessionMessages.map((msg) =>
+                      msg.id === state.streamingMessageId
+                        ? {
+                            ...msg,
+                            metadata: {
+                              ...msg.metadata,
+                              toolCall: { name: toolName, args: chunk.toolArgs },
+                              searchUsed: toolName === 'web_search',
+                              searchQuery,
+                            },
+                          }
+                        : msg
+                    ),
+                  },
+                })
+              } else if (chunk.type === 'complete') {
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMessage = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
+                const existingMetadata = currentMessage?.metadata || {}
+                const completeSources = chunk.sources || chunk.metadata?.sources || existingMetadata.sources || []
+
+                set({
+                  isLoading: false,
+                  streamingMessageId: null,
+                  currentTaskId: null,
+                  messagesBySession: {
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
+                        ? {
+                            ...msg,
+                            status: 'completed',
+                            metadata: {
+                              ...existingMetadata,
+                              ...chunk.metadata,
+                              sources: completeSources,
+                            },
+                          }
+                        : msg
+                    ),
+                  },
+                })
+              } else if (chunk.type === 'error') {
+                set({
+                  isLoading: false,
+                  streamingMessageId: null,
+                  currentTaskId: null,
+                  error: chunk.content,
+                  messagesBySession: {
+                    ...state.messagesBySession,
+                    [sessionId]: sessionMessages.map((msg) =>
+                      msg.id === state.streamingMessageId
+                        ? { ...msg, status: 'error', content: { type: 'text', text: chunk.content || '发生错误' } }
+                        : msg
+                    ),
+                  },
+                })
+              }
+            }
+          )
+
+          return true
+        } catch (error) {
+          console.error('[ChatStore] Resume session error:', error)
+          set({
+            isLoading: false,
+            streamingMessageId: null,
+            currentTaskId: null,
+            error: error instanceof Error ? error.message : '恢复失败',
+          })
+          return false
+        }
+      },
     }),
     {
       name: 'chat-storage',
@@ -435,7 +645,7 @@ export const useChatStore = create<ChatState>()(
 export function useMessages() {
   const messagesBySession = useChatStore((state) => state.messagesBySession)
   const currentSessionId = useChatStore((state) => state.currentSessionId)
-  
+
   if (!currentSessionId) return []
   return messagesBySession[currentSessionId] || []
 }

@@ -1,4 +1,4 @@
-from app.models.models import User, UserSettings, Session, Message, File
+from app.models.models import User, UserSettings, Session, Message, File, ChatTask
 from app.models.research import (
     ResearchTask,
     ResearchClarification,
@@ -13,6 +13,7 @@ __all__ = [
     "Session",
     "Message",
     "File",
+    "ChatTask",
     "ResearchTask",
     "ResearchClarification",
     "UserResearchQuota",

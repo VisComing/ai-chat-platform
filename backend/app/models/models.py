@@ -111,3 +111,23 @@ class File(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User")
+
+
+class ChatTask(Base):
+    """Chat generation task - enables resumable streaming"""
+    __tablename__ = "chat_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("sessions.id"), nullable=False, index=True)
+    message_id: Mapped[str] = mapped_column(String(36), ForeignKey("messages.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending, running, completed, failed, cancelled
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    session: Mapped["Session"] = relationship("Session")
+    message: Mapped["Message"] = relationship("Message")
+    user: Mapped["User"] = relationship("User")
