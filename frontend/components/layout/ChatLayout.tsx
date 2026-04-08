@@ -12,8 +12,22 @@ import { useRouter } from 'next/navigation'
 
 export function ChatLayout() {
   const router = useRouter()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false) // 移动端默认收起
   const [isInitializing, setIsInitializing] = useState(true)
+
+  // 检测屏幕宽度，桌面端自动展开侧边栏
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(true)
+      } else {
+        setSidebarOpen(false)
+      }
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   const currentSession = useCurrentSession()
   const { createSession, selectSession, sessions, init: initSessions } = useSessionStore()
   const { isAuthenticated } = useAuthStore()

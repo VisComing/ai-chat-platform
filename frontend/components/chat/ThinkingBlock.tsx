@@ -3,6 +3,9 @@
 import * as React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronRight, Brain, Lightbulb } from 'lucide-react'
 
@@ -76,25 +79,44 @@ export function ThinkingBlock({ content, isStreaming, isDeepThinking }: Thinking
         <div className="mt-2 px-4 py-3 rounded-xl text-sm leading-relaxed animate-fade-in bg-[#3b82f6]/5 text-[#212121] dark:text-white">
           <div className="break-words">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
               components={{
                 p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
                 strong: ({ children }) => <strong className="font-semibold text-[#3b82f6]">{children}</strong>,
                 em: ({ children }) => <em className="italic">{children}</em>,
-                code: ({ className, children, ...props }) => {
-                  if (className?.includes('language-')) {
+                // 数学公式样式
+                span({ className, children, ...props }) {
+                  if (className?.includes('katex')) {
+                    return <span className="text-base" {...props}>{children}</span>
+                  }
+                  return <span {...props}>{children}</span>
+                },
+                div({ className, children, ...props }) {
+                  if (className?.includes('katex-display')) {
                     return (
-                      <code className={cn('px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10', className)} {...props}>
+                      <div
+                        className="my-3 py-2 px-4 bg-[#3b82f6]/10 rounded-lg overflow-x-auto text-center"
+                        {...props}
+                      >
+                        {children}
+                      </div>
+                    )
+                  }
+                  return <div {...props}>{children}</div>
+                },
+                code: ({ className, children, ...props }) => {
+                  // 行内代码（非数学公式）
+                  if (!className?.includes('katex') && !className?.includes('language-')) {
+                    return (
+                      <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10" {...props}>
                         {children}
                       </code>
                     )
                   }
-                  return (
-                    <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10" {...props}>
-                      {children}
-                    </code>
-                  )
+                  return <code className={cn('px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10', className)} {...props}>{children}</code>
                 },
+                pre: ({ children }) => <>{children}</>,
                 ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
                 ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
                 li: ({ children }) => <li className="ml-2">{children}</li>,

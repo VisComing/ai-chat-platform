@@ -54,7 +54,7 @@ export function MessageList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto px-4"
+        className="h-full overflow-y-auto px-2 sm:px-4"
       >
         {messages.length === 0 && !isLoading ? (
           <EmptyState onSuggestionClick={onSuggestionClick} />
@@ -78,9 +78,9 @@ export function MessageList({
       {!autoScroll && messages.length > 0 && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 p-2 bg-primary-500 text-white rounded-full shadow-lg hover:bg-primary-600 transition-colors"
+          className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 p-2 bg-primary-500 text-white rounded-full shadow-lg hover:bg-primary-600 transition-colors"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
           </svg>
         </button>
@@ -105,31 +105,31 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (text: string) 
   }
 
   return (
-    <div className="h-full flex flex-col items-center justify-center text-center px-4 animate-fade-in">
-      {/* 大图标容器 - 蓝紫渐变 */}
-      <div className="w-24 h-24 mb-6 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg">
-        <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className="h-full flex flex-col items-center justify-center text-center px-3 sm:px-4 animate-fade-in">
+      {/* 大图标容器 - 蓝紫渐变，移动端缩小 */}
+      <div className="w-20 h-20 sm:w-24 sm:h-24 mb-4 sm:mb-6 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg">
+        <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
         </svg>
       </div>
 
       {/* 标题 */}
-      <h2 className="text-2xl font-semibold text-secondary-900 dark:text-white mb-3">
+      <h2 className="text-xl sm:text-2xl font-semibold text-secondary-900 dark:text-white mb-2 sm:mb-3">
         今天想聊点什么？
       </h2>
 
       {/* 副标题 */}
-      <p className="text-secondary-500 dark:text-secondary-400 max-w-md mb-10 leading-relaxed">
+      <p className="text-secondary-500 dark:text-secondary-400 max-w-sm sm:max-w-md mb-6 sm:mb-10 leading-relaxed text-sm sm:text-base">
         我可以帮你写作、编程、分析数据、解答问题。选择下方模板快速开始，或直接输入你的问题。
       </p>
 
       {/* Quick Start Suggestions - 悬停动效 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4 max-w-sm sm:max-w-lg w-full">
         {suggestions.map((suggestion, i) => (
           <button
             key={i}
             onClick={() => handleClick(suggestion.text)}
-            className="group flex items-center gap-3 p-4 text-left rounded-xl
+            className="group flex items-center gap-2 sm:gap-3 p-3 sm:p-4 text-left rounded-lg sm:rounded-xl
                        bg-white dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700
                        hover:border-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20
                        hover:shadow-md hover:-translate-y-0.5
@@ -137,12 +137,12 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (text: string) 
           >
             {/* 图标容器 */}
             <div className={cn(
-              'w-10 h-10 rounded-lg flex items-center justify-center text-xl',
+              'w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center text-base sm:text-xl shrink-0',
               `bg-gradient-to-br ${suggestion.color}`
             )}>
               {suggestion.icon}
             </div>
-            <span className="text-sm text-secondary-700 dark:text-secondary-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
+            <span className="text-xs sm:text-sm text-secondary-700 dark:text-secondary-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors truncate">
               {suggestion.text}
             </span>
           </button>

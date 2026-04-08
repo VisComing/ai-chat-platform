@@ -295,7 +295,7 @@ export function InputArea({
     <div className="border-t border-transparent bg-white dark:bg-[#0f0f1a]">
       {/* Settings Bar */}
       {showSettings && (
-        <div className="px-4 py-2 border-b border-[#f5f5f5] dark:border-white/5 flex items-center justify-end">
+        <div className="px-3 sm:px-4 py-2 border-b border-[#f5f5f5] dark:border-white/5 flex items-center justify-end">
           <button
             onClick={onSettingsClick}
             className="p-1 text-[#94a3b8] hover:text-[#212121] dark:hover:text-white"
@@ -306,10 +306,10 @@ export function InputArea({
       )}
 
       {/* Input Area - 极简居中设计 */}
-      <div className="p-4 flex justify-center">
+      <div className="p-3 sm:p-4 flex justify-center">
         <div
           className={cn(
-            'w-full max-w-[720px] rounded-[24px] bg-white dark:bg-[#1a1a2e]',
+            'w-full max-w-[720px] rounded-2xl sm:rounded-[24px] bg-white dark:bg-[#1a1a2e]',
             'border border-[#e5e7eb] dark:border-white/[0.08]',
             'shadow-[0_4px_24px_rgba(0,0,0,0.08)]',
             'transition-all duration-200',
@@ -321,9 +321,9 @@ export function InputArea({
         >
           {/* Image Preview Area */}
           {images.length > 0 && (
-            <div className="flex gap-2 p-4 pb-0 flex-wrap">
+            <div className="flex gap-2 p-3 sm:p-4 pb-0 flex-wrap">
               {images.map(img => (
-                <div key={img.id} className="relative w-16 h-16 group">
+                <div key={img.id} className="relative w-14 h-14 sm:w-16 sm:h-16 group">
                   <img
                     src={img.url}
                     alt={img.name}
@@ -352,7 +352,7 @@ export function InputArea({
           )}
 
           {/* Textarea */}
-          <div className="p-4">
+          <div className="p-3 sm:p-4">
             <textarea
               ref={textareaRef}
               value={input}
@@ -373,16 +373,16 @@ export function InputArea({
           </div>
 
           {/* Bottom Bar - 功能按钮左下角 */}
-          <div className="flex items-center justify-between px-4 pb-4">
+          <div className="flex items-center justify-between px-3 sm:px-4 pb-3 sm:pb-4">
             {/* Left: Feature Buttons */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               {/* Deep Thinking Toggle */}
               {onThinkingChange && (
                 <button
                   onClick={() => onThinkingChange(!enableThinking)}
                   disabled={!isThinkingModel(selectedModel)}
                   className={cn(
-                    'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                    'flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-3 rounded-full text-sm font-medium transition-all duration-200',
                     !isThinkingModel(selectedModel)
                       ? 'text-[#d1d5db] cursor-not-allowed'
                       : enableThinking
@@ -401,7 +401,7 @@ export function InputArea({
                 <button
                   onClick={() => onAgentChange(!useAgent)}
                   className={cn(
-                    'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                    'flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-3 rounded-full text-sm font-medium transition-all duration-200',
                     useAgent
                       ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
                       : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
@@ -418,7 +418,7 @@ export function InputArea({
                 onClick={handleImageButtonClick}
                 disabled={!multimodalSupported}
                 className={cn(
-                  'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                  'flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-3 rounded-full text-sm font-medium transition-all duration-200',
                   !multimodalSupported
                     ? 'text-[#d1d5db] cursor-not-allowed'
                     : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
@@ -440,7 +440,7 @@ export function InputArea({
             </div>
 
             {/* Right: Send Button */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               {input.length > maxLength * 0.8 && (
                 <span
                   className={cn(
@@ -456,19 +456,19 @@ export function InputArea({
               {isLoading ? (
                 <button
                   onClick={onStop}
-                  className="w-11 h-11 rounded-full bg-[#3b82f6] text-white
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-[#3b82f6] text-white
                              hover:bg-[#2563eb] transition-colors flex items-center justify-center"
                   title="停止生成"
                   type="button"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               ) : (
                 <button
                   onClick={handleSend}
                   disabled={!canSend}
                   className={cn(
-                    'w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200',
+                    'w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all duration-200',
                     !canSend
                       ? 'bg-[#e5e7eb] dark:bg-white/5 text-[#94a3b8] cursor-not-allowed'
                       : 'bg-[#3b82f6] text-white hover:bg-[#2563eb] hover:scale-105'
@@ -476,7 +476,7 @@ export function InputArea({
                   title={canSend ? '发送' : '请输入内容'}
                   type="button"
                 >
-                  <Send className="w-5 h-5" />
+                  <Send className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               )}
             </div>
@@ -495,8 +495,8 @@ export function InputArea({
         </div>
       )}
 
-      {/* Hints */}
-      <div className="flex items-center justify-center pb-3">
+      {/* Hints - 移动端隐藏 */}
+      <div className="hidden sm:flex items-center justify-center pb-3">
         <div className="flex items-center gap-3 text-xs text-[#94a3b8]">
           <span>按 Enter 发送，Shift + Enter 换行</span>
           {enableThinking && (

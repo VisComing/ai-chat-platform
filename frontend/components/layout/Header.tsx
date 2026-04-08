@@ -38,14 +38,15 @@ export function Header({ onToggleSidebar, title, onTitleChange }: HeaderProps) {
   }
 
   return (
-    <header className="h-14 border-b border-secondary-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 flex items-center justify-between px-4">
+    <header className="h-14 border-b border-secondary-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 flex items-center justify-between px-3 sm:px-4">
       {/* Left Section */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+        {/* Sidebar Toggle Button - 移动端在侧边栏收起时不显示（由Sidebar组件自己控制） */}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggleSidebar}
-          className="lg:hidden"
+          className="hidden lg:flex"
         >
           <Menu className="w-5 h-5" />
         </Button>
@@ -65,7 +66,7 @@ export function Header({ onToggleSidebar, title, onTitleChange }: HeaderProps) {
               }
             }}
             autoFocus
-            className="text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none px-1"
+            className="text-base sm:text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none px-1 flex-1 min-w-0"
           />
         ) : (
           <button
@@ -73,18 +74,18 @@ export function Header({ onToggleSidebar, title, onTitleChange }: HeaderProps) {
               setEditedTitle(title)
               setIsEditing(true)
             }}
-            className="group flex items-center gap-2 text-lg font-semibold text-secondary-900 dark:text-white hover:text-primary-500 transition-colors"
+            className="group flex items-center gap-1 sm:gap-2 text-base sm:text-lg font-semibold text-secondary-900 dark:text-white hover:text-primary-500 transition-colors truncate"
           >
-            {title}
-            <Pencil className="w-4 h-4 opacity-0 group-hover:opacity-100" />
+            <span className="truncate">{title}</span>
+            <Pencil className="w-3 h-3 sm:w-4 sm:h-4 opacity-0 group-hover:opacity-100 shrink-0" />
           </button>
         )}
       </div>
 
       {/* Right Section */}
-      <div className="flex items-center gap-2">
-        {/* Theme Toggle */}
-        <div className="flex items-center bg-secondary-100 dark:bg-secondary-800 rounded-lg p-1">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        {/* Theme Toggle - 移动端隐藏，使用下拉菜单 */}
+        <div className="hidden sm:flex items-center bg-secondary-100 dark:bg-secondary-800 rounded-lg p-1">
           {[
             { id: 'light', icon: Sun, label: '浅色' },
             { id: 'dark', icon: Moon, label: '深色' },
@@ -105,8 +106,20 @@ export function Header({ onToggleSidebar, title, onTitleChange }: HeaderProps) {
           ))}
         </div>
 
-        {/* Share */}
-        <Button variant="ghost" size="icon" title="分享">
+        {/* Mobile Theme Menu Button */}
+        <button
+          onClick={() => {
+            const nextTheme = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light'
+            handleThemeChange(nextTheme)
+          }}
+          className="sm:hidden p-2 text-secondary-500 hover:text-secondary-700 dark:hover:text-secondary-300 rounded-lg transition-colors"
+          title="切换主题"
+        >
+          {theme === 'light' ? <Sun className="w-5 h-5" /> : theme === 'dark' ? <Moon className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+        </button>
+
+        {/* Share - 移动端隐藏 */}
+        <Button variant="ghost" size="icon" title="分享" className="hidden sm:flex">
           <Share2 className="w-5 h-5" />
         </Button>
 
@@ -121,7 +134,7 @@ export function Header({ onToggleSidebar, title, onTitleChange }: HeaderProps) {
           alt="用户"
           fallback="U"
           size="sm"
-          className="ml-2 cursor-pointer"
+          className="ml-1 sm:ml-2 cursor-pointer"
         />
       </div>
     </header>

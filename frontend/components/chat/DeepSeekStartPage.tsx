@@ -218,35 +218,35 @@ export function DeepSeekStartPage({
   const hasContent = inputValue.trim().length > 0
 
   return (
-    <div className={cn('flex flex-col items-center justify-center min-h-full px-4', className)}>
-      {/* Brand Section */}
-      <div className="flex flex-col items-center mb-8" style={{ marginTop: '15vh' }}>
-        {/* Logo - 品牌蓝 80px */}
-        <div className="w-20 h-20 rounded-2xl bg-[#3b82f6] flex items-center justify-center mb-4 shadow-lg shadow-[#3b82f6]/20">
-          <WhaleLogo className="w-10 h-10 text-white" />
+    <div className={cn('flex flex-col items-center justify-center min-h-full px-3 sm:px-4', className)}>
+      {/* Brand Section - 移动端减少顶部间距 */}
+      <div className="flex flex-col items-center mb-4 sm:mb-8" style={{ marginTop: '8vh' }}>
+        {/* Logo - 品牌蓝，移动端缩小 */}
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#3b82f6] flex items-center justify-center mb-3 sm:mb-4 shadow-lg shadow-[#3b82f6]/20">
+          <WhaleLogo className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
         </div>
-        <h1 className="text-xl font-semibold text-[#212121] dark:text-white">
+        <h1 className="text-lg sm:text-xl font-semibold text-[#212121] dark:text-white">
           今天想聊点什么？
         </h1>
       </div>
 
       {/* Mode Switcher */}
-      <div className="mb-6">
+      <div className="mb-4 sm:mb-6">
         <ModeSwitcher mode={mode} onChange={setMode} />
       </div>
 
       {/* Input Container */}
       <div
         className={cn(
-          'w-full max-w-[720px] bg-white dark:bg-[#1a1a2e] rounded-3xl transition-all duration-200',
+          'w-full max-w-[720px] bg-white dark:bg-[#1a1a2e] rounded-2xl sm:rounded-3xl transition-all duration-200',
           'border border-[#e5e7eb] dark:border-white/[0.08]',
           isFocused
-            ? 'border-[#3b82f6] ring-4 ring-[#3b82f6]/10'
+            ? 'border-[#3b82f6] ring-2 sm:ring-4 ring-[#3b82f6]/10'
             : 'shadow-[0_4px_24px_rgba(0,0,0,0.08)]'
         )}
       >
         {/* Textarea */}
-        <div className="p-5 pb-3">
+        <div className="p-4 sm:p-5 pb-2 sm:pb-3">
           <textarea
             ref={textareaRef}
             value={inputValue}
@@ -257,7 +257,7 @@ export function DeepSeekStartPage({
             placeholder={mode === 'quick' ? '发送消息开始对话...' : '输入研究问题，开始深度分析...'}
             className={cn(
               'w-full resize-none bg-transparent outline-none text-[#212121] dark:text-white',
-              'min-h-[80px] max-h-[200px] text-base leading-relaxed',
+              'min-h-[60px] sm:min-h-[80px] max-h-[200px] text-base leading-relaxed',
               'placeholder:text-[#94a3b8]'
             )}
             rows={1}
@@ -265,7 +265,7 @@ export function DeepSeekStartPage({
         </div>
 
         {/* Bottom Bar */}
-        <div className="flex items-center justify-between px-5 pb-5">
+        <div className="flex items-center justify-between px-4 sm:px-5 pb-4 sm:pb-5">
           {/* Left: Feature Buttons */}
           <FeatureButtons
             mode={mode}
@@ -278,10 +278,10 @@ export function DeepSeekStartPage({
           />
 
           {/* Right: Action Buttons */}
-          <div className="flex items-center gap-3">
-            {/* Attachment Button */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Attachment Button - 移动端隐藏 */}
             <button
-              className="p-2 text-[#94a3b8] hover:text-[#64748b] transition-colors"
+              className="p-2 text-[#94a3b8] hover:text-[#64748b] transition-colors hidden sm:block"
               title="添加附件"
             >
               <Paperclip className="w-5 h-5" />
@@ -292,18 +292,18 @@ export function DeepSeekStartPage({
               onClick={handleSend}
               disabled={!hasContent || isLoading}
               className={cn(
-                'flex items-center justify-center w-11 h-11 rounded-full transition-all duration-200',
+                'flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200',
                 hasContent && !isLoading
                   ? 'bg-[#3b82f6] hover:bg-[#2563eb] hover:-translate-y-0.5 shadow-lg shadow-[#3b82f6]/25'
                   : 'bg-[#e5e7eb] dark:bg-white/5 cursor-not-allowed'
               )}
             >
               {isLoading ? (
-                <Loader2 className="w-5 h-5 text-white animate-spin" />
+                <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-spin" />
               ) : (
                 <Send
                   className={cn(
-                    'w-5 h-5 transition-colors',
+                    'w-4 h-4 sm:w-5 sm:h-5 transition-colors',
                     hasContent ? 'text-white' : 'text-[#94a3b8]'
                   )}
                 />
@@ -315,7 +315,7 @@ export function DeepSeekStartPage({
 
       {/* Tips for Expert Mode */}
       {mode === 'expert' && enableDeepResearch && (
-        <div className="mt-4 text-sm text-[#94a3b8] text-center max-w-[720px]">
+        <div className="mt-3 sm:mt-4 text-sm text-[#94a3b8] text-center max-w-[720px] px-3">
           <p className="flex items-center justify-center gap-2">
             <Sparkles className="w-4 h-4 text-[#3b82f6]" />
             深度研究将在后台异步执行，您可以关闭页面稍后查看结果
@@ -325,7 +325,7 @@ export function DeepSeekStartPage({
 
       {/* Quick Suggestions - 能力卡片网格 */}
       {mode === 'quick' && !hasContent && (
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[720px] w-full">
+        <div className="mt-4 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 max-w-[720px] w-full px-1 sm:px-0">
           {[
             { icon: '💡', text: '帮我解释量子计算', desc: '科学知识解答' },
             { icon: '📝', text: '写一封商务邮件', desc: '写作助手' },
@@ -335,19 +335,19 @@ export function DeepSeekStartPage({
             <button
               key={i}
               onClick={() => setInputValue(suggestion.text)}
-              className="group flex items-center gap-3 p-4 text-left rounded-2xl
+              className="group flex items-center gap-2 sm:gap-3 p-3 sm:p-4 text-left rounded-xl sm:rounded-2xl
                          bg-white dark:bg-[#1a1a2e] border border-[#e5e7eb] dark:border-white/[0.08]
                          hover:border-[#3b82f6]/30 hover:shadow-md hover:-translate-y-0.5
                          transition-all duration-200"
             >
-              <div className="w-10 h-10 rounded-xl bg-[#f5f5f5] dark:bg-white/5 flex items-center justify-center text-lg">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#f5f5f5] dark:bg-white/5 flex items-center justify-center text-base sm:text-lg shrink-0">
                 {suggestion.icon}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#212121] dark:text-white truncate">
                   {suggestion.text}
                 </p>
-                <p className="text-xs text-[#94a3b8]">{suggestion.desc}</p>
+                <p className="text-xs text-[#94a3b8] hidden sm:block">{suggestion.desc}</p>
               </div>
             </button>
           ))}

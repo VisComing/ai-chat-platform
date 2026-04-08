@@ -164,11 +164,11 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
 
   return (
     <>
-      {/* Collapsed Sidebar Toggle Button */}
+      {/* Mobile Sidebar Toggle Button - 只在侧边栏收起时显示 */}
       {!isOpen && (
         <button
           onClick={onToggle}
-          className="fixed left-0 top-4 z-50 p-2 bg-[#1a1a2e] text-white hover:bg-[#252542] rounded-r-lg shadow-lg transition-colors"
+          className="fixed top-4 left-4 z-50 p-2.5 bg-[#1a1a2e] text-white hover:bg-[#252542] rounded-lg shadow-lg transition-colors lg:hidden"
           aria-label="展开侧边栏"
         >
           <Menu className="w-5 h-5" />
@@ -179,11 +179,16 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
       <aside
         className={cn(
           'h-screen bg-[#1a1a2e] text-white flex flex-col transition-all duration-300',
-          isOpen ? 'w-64' : 'w-0 overflow-hidden'
+          // 桌面端：固定侧边栏
+          'lg:relative lg:transition-[width]',
+          isOpen ? 'lg:w-64' : 'lg:w-0 lg:overflow-hidden',
+          // 移动端：固定宽度侧边栏（不占满全屏）
+          'fixed left-0 top-0 z-50 h-full',
+          isOpen ? 'w-[280px] max-w-[85vw] translate-x-0' : 'w-0 -translate-x-full overflow-hidden'
         )}
       >
         {/* Header - 品牌区极简设计 */}
-        <div className="h-16 px-4 flex items-center justify-between">
+        <div className="h-14 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* 单色蓝 Logo */}
             <div className="w-10 h-10 rounded-[10px] bg-[#3b82f6] flex items-center justify-center">
@@ -191,12 +196,14 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
             </div>
             <span className="font-semibold text-base text-[#f8fafc]">AI助手</span>
           </div>
+          {/* 关闭按钮 - 移动端显示 X，桌面端显示菜单图标 */}
           <button
             onClick={onToggle}
             className="p-2 text-[#94a3b8] hover:text-white rounded-lg transition-colors"
             title="收起侧边栏"
           >
-            <Menu className="w-5 h-5" />
+            <X className="w-5 h-5 lg:hidden" />
+            <Menu className="w-5 h-5 hidden lg:block" />
           </button>
         </div>
 
@@ -311,10 +318,10 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
         </div>
       </aside>
 
-      {/* Mobile Overlay */}
+      {/* Mobile Overlay - 点击遮罩关闭侧边栏 */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden backdrop-blur-sm"
           onClick={onToggle}
         />
       )}

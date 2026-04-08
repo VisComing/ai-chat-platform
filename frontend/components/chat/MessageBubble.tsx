@@ -47,20 +47,20 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        'flex gap-3 py-4 px-4 animate-message-enter',
+        'flex gap-2 sm:gap-3 py-3 sm:py-4 px-3 sm:px-4 animate-message-enter',
         isUser ? 'flex-row' : 'flex-row' // 统一左侧对齐
       )}
     >
       {/* Avatar */}
       {isUser ? (
-        // 用户头像 - 品牌蓝圆形
-        <div className="w-9 h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
-          <span className="text-white text-sm font-medium">U</span>
+        // 用户头像 - 品牌蓝圆形，移动端缩小
+        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
+          <span className="text-white text-xs sm:text-sm font-medium">U</span>
         </div>
       ) : (
-        // AI 头像 - 品牌蓝 + Bot 图标
-        <div className="w-9 h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
-          <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        // AI 头像 - 品牌蓝 + Bot 图标，移动端缩小
+        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
+          <svg className="w-4 h-4 sm:w-5 sm:h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z" />
             <circle cx="8" cy="14" r="2" />
             <circle cx="16" cy="14" r="2" />
@@ -118,9 +118,9 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Actions - hover 显示 */}
+        {/* Actions - hover 显示（桌面端），移动端始终显示 */}
         {showActions && !isUser && message.status === 'completed' && (
-          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 mt-2 opacity-0 sm:group-hover:opacity-100 transition-opacity sm:opacity-0">
             <button
               onClick={handleCopy}
               className="p-1.5 text-[#94a3b8] hover:text-[#212121] hover:bg-[#f5f5f5] dark:hover:bg-white/10 rounded transition-colors"
