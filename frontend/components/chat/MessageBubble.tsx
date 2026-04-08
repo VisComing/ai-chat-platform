@@ -8,7 +8,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/ui'
-import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Search, ExternalLink, Clock } from 'lucide-react'
+import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Search, ExternalLink, Clock, Globe } from 'lucide-react'
 import type { Message, Source } from '@/types'
 import { ThinkingBlock } from './ThinkingBlock'
 
@@ -70,11 +70,11 @@ export function MessageBubble({
 
       {/* Message Content */}
       <div className="flex-1 min-w-0">
-        {/* Search Indicator */}
+        {/* Search Indicator with Sources */}
         {!isUser && message.metadata?.searchUsed && (
-          <SearchIndicator
+          <SearchIndicatorWithSources
             query={message.metadata.searchQuery || ''}
-            resultCount={message.metadata.searchResultCount || 0}
+            sources={message.metadata.sources || []}
             isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
           />
         )}
@@ -165,11 +165,7 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Sources Section */}
-        {!isUser && message.metadata?.sources && message.metadata.sources.length > 0 && (
-          <SourcesSection sources={message.metadata.sources} />
-        )}
-      </div>
+              </div>
     </div>
   )
 }
@@ -443,80 +439,73 @@ function formatTime(date: Date | string): string {
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Search Indicator Component
-function SearchIndicator({ 
-  query, 
-  resultCount, 
-  isSearching 
-}: { 
+// Search Indicator with Sources Component
+function SearchIndicatorWithSources({
+  query,
+  sources,
+  isSearching
+}: {
   query: string
-  resultCount: number
+  sources: Source[]
   isSearching: boolean
 }) {
+  const [expanded, setExpanded] = React.useState(false)
+
   return (
-    <div className="mb-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
-      <div className="flex items-center gap-2">
-        {isSearching ? (
-          <>
-            <div className="animate-spin">
-              <Search className="w-4 h-4 text-blue-500" />
-            </div>
-            <span className="text-blue-600 dark:text-blue-400">
-              正在搜索 "{query}"...
-            </span>
-          </>
-        ) : (
-          <>
-            <Check className="w-4 h-4 text-green-500" />
-            <span className="text-blue-600 dark:text-blue-400">
-              已找到 {resultCount} 条相关结果
-            </span>
-          </>
+    <div className="mb-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm overflow-hidden">
+      {/* Header - always visible */}
+      <div className="p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {isSearching ? (
+              <>
+                <div className="animate-spin">
+                  <Search className="w-4 h-4 text-blue-500" />
+                </div>
+                <span className="text-blue-600 dark:text-blue-400">
+                  正在搜索 "{query}"...
+                </span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 text-green-500" />
+                <span className="text-blue-600 dark:text-blue-400">
+                  已找到 {sources.length} 条相关结果
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Toggle button - only show when has sources */}
+          {!isSearching && sources.length > 0 && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 transition-colors"
+            >
+              <span>{expanded ? '收起' : '查看来源'}</span>
+              <svg
+                className={cn("w-3 h-3 transition-transform", expanded && "rotate-180")}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          )}
+        </div>
+        {isSearching && (
+          <div className="mt-2 h-1 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 animate-pulse w-full" />
+          </div>
         )}
       </div>
-      {isSearching && (
-        <div className="mt-2 h-1 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 animate-pulse w-full" />
-        </div>
-      )}
-    </div>
-  )
-}
 
-// Sources Section Component
-function SourcesSection({ sources }: { sources: Source[] }) {
-  const [expanded, setExpanded] = React.useState(false)
-  
-  if (sources.length === 0) return null
-  
-  return (
-    <div className="mt-3 border border-secondary-200 dark:border-secondary-700 rounded-lg overflow-hidden">
-      {/* Header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-3 py-2 bg-secondary-50 dark:bg-secondary-800 flex items-center justify-between hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <ExternalLink className="w-4 h-4 text-secondary-500" />
-          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">
-            参考来源 ({sources.length})
-          </span>
-        </div>
-        <svg
-          className={cn("w-4 h-4 text-secondary-500 transition-transform", expanded && "rotate-180")}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      
-      {/* Sources List */}
-      {expanded && (
-        <div className="divide-y divide-secondary-200 dark:divide-secondary-700">
+      {/* Sources List - expandable */}
+      {!isSearching && expanded && sources.length > 0 && (
+        <div className="border-t border-blue-200 dark:border-blue-700 divide-y divide-blue-200 dark:divide-blue-700">
           {sources.map((source, index) => (
-            <SourceCard key={source.id || index} source={source} index={index + 1} />
+            <SourceCardInline key={source.id || index} source={source} index={index + 1} />
           ))}
         </div>
       )}
@@ -524,42 +513,44 @@ function SourcesSection({ sources }: { sources: Source[] }) {
   )
 }
 
-// Source Card Component
-function SourceCard({ source, index }: { source: Source; index: number }) {
-  const relevanceScore = source.rerankScore 
-    ? Math.round(source.rerankScore * 100) 
+// Source Card Inline Component
+function SourceCardInline({ source, index }: { source: Source; index: number }) {
+  const relevanceScore = source.rerankScore
+    ? Math.round(source.rerankScore * 100)
     : undefined
-  
+
+  const hostname = React.useMemo(() => {
+    try {
+      return new URL(source.url).hostname.replace(/^www\./, '')
+    } catch {
+      return source.url
+    }
+  }, [source.url])
+
   return (
     <a
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block px-3 py-2 hover:bg-secondary-50 dark:hover:bg-secondary-800 transition-colors"
+      className="block px-3 py-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
     >
       <div className="flex items-start gap-2">
         {/* Citation Number */}
-        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400 text-xs font-medium flex items-center justify-center">
+        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 text-xs font-medium flex items-center justify-center">
           {index}
         </span>
-        
+
         {/* Content */}
         <div className="flex-1 min-w-0">
           {/* Title */}
-          <h4 className="text-sm font-medium text-secondary-900 dark:text-white truncate">
+          <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
             {source.title}
           </h4>
-          
-          {/* Snippet */}
-          {source.snippet && (
-            <p className="mt-1 text-xs text-secondary-600 dark:text-secondary-400 line-clamp-2">
-              {source.snippet}
-            </p>
-          )}
-          
+
           {/* Meta */}
-          <div className="mt-1 flex items-center gap-2 text-xs text-secondary-400">
-            <span className="truncate">{source.url}</span>
+          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <Globe className="w-3 h-3" />
+            <span className="truncate">{hostname}</span>
             {source.publishedTime && (
               <>
                 <span>•</span>
@@ -570,11 +561,13 @@ function SourceCard({ source, index }: { source: Source; index: number }) {
             {relevanceScore !== undefined && (
               <>
                 <span>•</span>
-                <span className="text-primary-500">{relevanceScore}% 相关</span>
+                <span className="text-green-500">{relevanceScore}% 相关</span>
               </>
             )}
           </div>
         </div>
+
+        <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
       </div>
     </a>
   )
