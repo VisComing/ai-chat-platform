@@ -62,3 +62,6 @@ data/
 
 # Claude Code
 .claude/
+
+# WorkBuddy
+.workbuddy/
