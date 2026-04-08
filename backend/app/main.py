@@ -5,9 +5,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import init_db, close_db, async_session_maker
+from app.core.logging import setup_logging, get_logger
 from app.core.security import get_password_hash
-from app.api.v1 import auth, sessions, chat, users, files, speech, research
+from app.api.v1 import auth, sessions, chat, users, files, speech, research, research_async
 from app.models import User
+
+# Initialize logging
+setup_logging()
+logger = get_logger("app.main")
 
 
 async def create_test_user():
@@ -27,18 +32,22 @@ async def create_test_user():
         )
         db.add(test_user)
         await db.commit()
-        print("[Startup] Test user created: testuser / testpass123")
+        logger.info("Test user created: testuser / testpass123")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler"""
     # Startup
+    logger.info("Application starting up...")
     await init_db()
     await create_test_user()
+    logger.info("Application startup complete")
     yield
     # Shutdown
+    logger.info("Application shutting down...")
     await close_db()
+    logger.info("Application shutdown complete")
 
 
 # Create FastAPI application
@@ -83,7 +92,8 @@ app.include_router(users.router, prefix=f"{settings.api_prefix}/users", tags=["�
 app.include_router(sessions.router, prefix=f"{settings.api_prefix}/sessions", tags=["会话"])
 app.include_router(chat.router, prefix=f"{settings.api_prefix}/chat", tags=["对话"])
 app.include_router(files.router, prefix=f"{settings.api_prefix}/files", tags=["文件"])
-app.include_router(research.router, prefix=f"{settings.api_prefix}/research", tags=["深度研究"])
+app.include_router(research.router, prefix=f"{settings.api_prefix}/research", tags=["深度研究(同步)"])
+app.include_router(research_async.router, prefix=f"{settings.api_prefix}/research", tags=["深度研究(异步)"])
 
 
 # Health check endpoint
@@ -104,12 +114,12 @@ async def speech_websocket(websocket: WebSocket):
 @app.websocket("/ws/test")
 async def test_websocket(websocket: WebSocket):
     """Simple test WebSocket endpoint"""
-    print("[TestWS] Connection attempt")
+    logger.debug("TestWS: Connection attempt")
     await websocket.accept()
-    print("[TestWS] Accepted")
+    logger.debug("TestWS: Accepted")
     await websocket.send_json({"type": "connected", "message": "Hello!"})
     data = await websocket.receive_json()
-    print(f"[TestWS] Received: {data}")
+    logger.debug(f"TestWS: Received: {data}")
     await websocket.send_json({"type": "echo", "data": data})
     await websocket.close()
 

@@ -193,17 +193,29 @@ async def stream_chat(
     message_id = ai_message.id
 
     # ========== Get Conversation History ==========
+    # Exclude the placeholder AI message we just created (id == message_id)
     result = await db.execute(
         select(Message)
-        .where(Message.session_id == session_id)
+        .where(Message.session_id == session_id, Message.id != message_id)
         .order_by(Message.created_at)
         .limit(20)
     )
     history_messages = result.scalars().all()
 
+    logger.info(f"[Chat] History messages count: {len(history_messages)}, excluded message_id: {message_id}")
+    for msg in history_messages:
+        logger.debug(f"[Chat] History msg: id={msg.id}, role={msg.role}, content_preview={str(msg.content)[:50]}")
+
     messages: List[Dict[str, Any]] = []
     for msg in history_messages:
         msg_content = msg.content if isinstance(msg.content, dict) else {"type": "text", "text": str(msg.content)}
+
+        # Skip empty assistant messages
+        if msg.role == "assistant":
+            text_content = msg_content.get("text", "") if isinstance(msg_content, dict) else str(msg_content)
+            if not text_content or text_content.strip() == "":
+                logger.info(f"[Chat] Skipping empty assistant message: id={msg.id}")
+                continue
 
         # Resolve image URLs to base64 for AI API consumption
         msg_content = await resolve_image_urls(db, msg_content, user_id)
@@ -462,6 +474,7 @@ async def _stream_agent_response(
 
         elif event_type == "complete":
             search_used = event_data.get("search_used", False)
+            sources = event_data.get("sources", [])
             citations = event_data.get("citations", [])
 
             ai_message.content = {"type": "text", "text": accumulated_text}
@@ -474,6 +487,7 @@ async def _stream_agent_response(
                 },
                 "duration": time.time() - start_time,
                 "search_used": search_used,
+                "sources": sources,  # 传递 sources 给前端
                 "citations": citations,
             }
             session.message_count += 1
@@ -486,6 +500,7 @@ async def _stream_agent_response(
                     "type": "complete",
                     "messageId": message_id,
                     "search_used": search_used,
+                    "sources": sources,  # 传递 sources 给前端
                     "citations": citations,
                     "meta": ai_message.meta,
                 }, ensure_ascii=False),

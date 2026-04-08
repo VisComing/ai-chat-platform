@@ -7,7 +7,7 @@
 - **框架**: FastAPI 0.115 + Python 3.12
 - **数据库**: SQLAlchemy 2.0 + SQLite/PostgreSQL
 - **认证**: JWT (python-jose)
-- **任务队列**: Celery
+- **任务队列**: Huey (SQLite)
 - **测试**: pytest + pytest-asyncio
 
 ## 快速开始
@@ -15,7 +15,6 @@
 ### 环境要求
 
 - Python 3.12+
-- Redis (可选)
 
 ### 安装依赖
 
@@ -103,7 +102,7 @@ pytest tests/ -v --cov=app
 
 ```env
 DATABASE_URL=sqlite+aiosqlite:///./chat.db
-REDIS_URL=redis://localhost:6379/0
+HUEY_SQLITE_PATH=./huey.db
 SECRET_KEY=your-secret-key
 JWT_SECRET_KEY=your-jwt-secret
 OPENAI_API_KEY=your-openai-key

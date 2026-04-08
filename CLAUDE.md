@@ -33,31 +33,14 @@
 - Avoid terms to describe development progress (`FIXED`, `Step`, `Week`, `Section`, `Phase`, `AC-x`, etc) in code comments or commit message or PR body.
 - Avoid AI tools name (like Codex, Claude, Grok, Gemini, ...) in code comments or git commit message (including authorship) or PR body.
 
+## 其余事项
+- 联网搜索优先使用websearch MCP
 
 # AI对话平台 - Claude Code 项目指南
 
 ## 项目概述
 
 这是一个基于 Next.js + Python 的智能对话交互平台，支持多模态输入输出、Agent任务执行、联网搜索等核心能力。
-
-## 技术栈
-
-### 前端
-- **框架**: Next.js 15 + React 19 + TypeScript
-- **样式**: Tailwind CSS
-- **状态管理**: Zustand
-- **UI组件**: Radix UI + shadcn/ui 风格
-- **数据请求**: TanStack Query
-- **测试**: Jest + Playwright
-
-### 后端
-- **框架**: FastAPI + Python 3.12
-- **数据库**: SQLAlchemy (async) + PostgreSQL/SQLite
-- **AI集成**: LangGraph + LangChain + OpenAI SDK
-- **AI服务**: 阿里云百炼平台 (qwen系列模型)
-- **搜索服务**: 阿里云 IQS UnifiedSearch API
-- **认证**: JWT + python-jose
-- **测试**: pytest + pytest-asyncio
 
 ## 项目结构
 
@@ -87,14 +70,9 @@ ai-chat-platform/
 │   └ requirements.txt        # Python依赖
 │
 ├── docs/                     # 文档
-│   ├── PRD.md                # 产品需求文档
-│   ├── agent-architecture.md # Agent架构说明
-│   └── agent-integration.md  # Agent集成指南
 │
 ├── design/                   # 设计文档
 │   └ UI-Design-System.md     # UI设计系统
-│
-└── docker-compose.yml        # Docker编排配置
 ```
 
 ## 核心API端点
@@ -106,24 +84,6 @@ ai-chat-platform/
 - `/api/v1/chat/agent/stream` - Agent对话 SSE流式接口 (带联网搜索)
 - `/api/v1/files` - 文件上传/下载
 - `/health` - 健康检查
-
-## 支持的AI模型
-
-- `qwen3.5-plus` (默认)
-- `qwen3-max-2026-01-23`
-- `qwen3-coder-next` / `qwen3-coder-plus`
-- `glm-5` / `glm-4.7`
-- `kimi-k2.5`
-- `MiniMax-M2.5`
-
-## Agent联网搜索架构
-
-基于 LangGraph 构建，支持自动判断是否需要联网搜索：
-- **SearchService**: 封装阿里云IQS UnifiedSearch API
-- **AgentService**: LangGraph状态机，自动决策搜索需求
-- **SSE事件**: session, thinking, tool_call, text, complete, error
-
-详见: `docs/agent-architecture.md`
 
 ## 开发指南
 
@@ -139,20 +99,6 @@ npm run dev  # http://localhost:3000
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload  # http://localhost:8000
-```
-
-### Docker启动
-```bash
-docker-compose up -d
-```
-
-### 测试
-```bash
-# 前端测试
-cd frontend && npm test
-
-# 后端测试
-cd backend && pytest
 ```
 
 ## 代码风格约定

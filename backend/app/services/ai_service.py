@@ -8,9 +8,12 @@ import asyncio
 import os
 import re
 import base64
+import logging
 from typing import AsyncGenerator, Optional, List, Dict, Any, Tuple, Union
 from dataclasses import dataclass
 from app.core.config import get_settings
+
+logger = logging.getLogger("app.ai")
 
 
 def load_image_as_base64(file_path: str) -> str | None:
@@ -64,7 +67,7 @@ def load_image_as_base64(file_path: str) -> str | None:
                 b64_data = base64.b64encode(image_data).decode('utf-8')
                 return f"data:{mime_type};base64,{b64_data}"
             except Exception as e:
-                print(f"[AI Service] Error loading image {path}: {e}")
+                logger.error(f"Failed to load image {path}: {e}")
                 continue
 
     return None
@@ -178,9 +181,9 @@ class AIService:
                             "type": "image_url",
                             "image_url": {"url": b64_uri}
                         })
-                        print(f"[AI Service] Converted image to base64: {url[:50]}...")
+                        logger.debug(f"Converted image to base64: {url[:50]}...")
                     else:
-                        print(f"[AI Service] Warning: Could not load image {url}")
+                        logger.warning(f"Could not load image: {url}")
                         # Skip this image if we can't load it
 
         # Add text content
@@ -405,140 +408,50 @@ class AIService:
         ai_response: str = "",
     ) -> str:
         """
-        Generate a concise title for the conversation
-
-        Optimized approach:
-        - Uses minimal tokens with concise prompt
-        - Title length: 5-15 Chinese characters
-        - Falls back to smart keyword extraction
+        Generate a concise title for the conversation using LLM
 
         Args:
             user_message: First user message
             ai_response: First AI response (optional, helps context)
 
         Returns:
-            Generated title string
+            Generated title string (max 10 characters)
         """
-        # First, try smart keyword extraction (no AI needed for simple cases)
-        quick_title = self._quick_extract_title(user_message)
-        if quick_title:
-            print(f"[Title Generation] Quick extract: {quick_title}")
-            return quick_title
+        # Build input content with conversation context
+        ai_response_truncated = ai_response[:500] if len(ai_response) > 500 else ai_response
+        input_content = f"用户: {user_message}\n助手: {ai_response_truncated}"
 
-        # For complex queries, use AI with minimal prompt
-        user_msg_truncated = user_message[:100] if len(user_message) > 100 else user_message
-
-        # Very concise prompt to save tokens
-        prompt = f'用5-15字概括主题，只返回标题:\n"{user_msg_truncated}"'
+        # System prompt for title generation
+        system_prompt = "基于以下对话，生成一个10字以内的标题，只返回标题"
 
         try:
             title = await self.chat_completion_sync(
-                messages=[{"role": "user", "content": prompt}],
-                model="qwen3.5-plus",
-                max_tokens=20,  # Reduced from 50
-                temperature=0.1,  # Lower for more consistent output
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": input_content},
+                ],
+                model=self.settings.title_generation_model,
+                max_tokens=20,
+                temperature=0.3,
             )
 
-            print(f"[Title Generation] AI raw: {title}")
+            logger.info(f"[Title Generation] AI raw: {title}")
 
             # Clean up the title
             title = title.strip().strip('"\'').strip()
 
-            # Validate length (5-15 chars)
+            # Validate length (max 10 chars as per prompt)
             if len(title) < 2:
-                return self._extract_keywords(user_message)
-            if len(title) > 15:
-                title = title[:15]
+                return "新对话"
+            if len(title) > 10:
+                title = title[:10]
 
-            print(f"[Title Generation] Final: {title}")
+            logger.info(f"[Title Generation] Final: {title}")
             return title
 
         except Exception as e:
-            print(f"[Title Generation] AI failed: {e}")
-            return self._extract_keywords(user_message)
+            logger.error(f"[Title Generation] AI failed: {e}")
+            return "新对话"
 
-    def _quick_extract_title(self, text: str) -> str | None:
-        """
-        Quick title extraction without AI for simple queries
-
-        Returns None if AI is needed, otherwise returns a title
-        """
-        text = text.strip()
-
-        # Pattern-based extraction for common cases
-        import re
-
-        # Question patterns - extract the core topic
-        question_match = re.search(r'^(?:请问|请教|帮我|请|我想问)?[，,\s]*([^.!?。！？]{2,15})[？?]?$', text)
-        if question_match:
-            topic = question_match.group(1).strip()
-            # Remove common prefixes
-            topic = re.sub(r'^(如何|怎么|怎样|为什么|什么是|能不能|可以|帮我)', '', topic)
-            if 2 <= len(topic) <= 15:
-                return topic
-
-        # Direct topic patterns
-        # "写一个..." -> "写..."
-        write_match = re.search(r'^(写|生成|创作|编|做一个)([^.!?。！？]{1,12})', text)
-        if write_match:
-            action = write_match.group(1)
-            topic = write_match.group(2).strip()
-            result = f"{action}{topic}"
-            if len(result) <= 15:
-                return result
-
-        # Simple greeting
-        greetings = ['你好', '您好', 'hi', 'hello', '嗨']
-        if any(text.lower().startswith(g) for g in greetings):
-            return '问候对话'
-
-        # Code related
-        if re.search(r'(代码|code|编程|函数|class|def |function)', text.lower()):
-            return '代码问题'
-
-        # Translation
-        if re.search(r'(翻译|translate|译成)', text.lower()):
-            return '翻译请求'
-
-        # Math/calculation
-        if re.search(r'(计算|算|等于|\d+\s*[+\-*/])', text):
-            return '数学计算'
-
-        # Need AI for complex cases
-        return None
-
-    def _extract_keywords(self, text: str) -> str:
-        """
-        Fallback: Extract keywords from text for title
-        """
-        import re
-
-        # Remove common filler words
-        filler_patterns = [
-            r'帮我', r'请', r'我想', r'能不能', r'可以',
-            r'如何', r'怎么', r'怎样', r'为什么', r'什么是',
-            r'请问', r'请教', r'麻烦'
-        ]
-        clean_text = text
-        for pattern in filler_patterns:
-            clean_text = re.sub(pattern, '', clean_text)
-
-        # Remove punctuation at start/end
-        clean_text = re.sub(r'^[，,\s、]+|[？?！!。.，,\s、]+$', '', clean_text)
-
-        # Take first 15 chars
-        if len(clean_text) > 15:
-            # Try to cut at a natural break point
-            break_chars = ['，', ',', '。', ' ', '、']
-            for char in break_chars:
-                if char in clean_text[:15]:
-                    clean_text = clean_text[:clean_text.index(char)]
-                    break
-            else:
-                clean_text = clean_text[:15]
-
-        return clean_text if clean_text else "新对话"
-
-
-# Singleton instance
+    # Singleton instance
 ai_service = AIService()

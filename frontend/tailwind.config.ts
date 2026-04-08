@@ -117,6 +117,10 @@ const config: Config = {
         'pulse-glow': 'pulseGlow 2s infinite',
         'brain-wave': 'brainWave 1.5s infinite',
         'blink': 'blink 1s infinite',
+        // UI/UX 优化新增动效
+        'indicator-slide': 'indicatorSlide 250ms ease-out',
+        'bg-fade-in': 'bgFadeIn 250ms ease-out',
+        'hover-lift': 'hoverLift 200ms ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -176,6 +180,19 @@ const config: Config = {
         blink: {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0' },
+        },
+        // UI/UX 优化新增动效
+        indicatorSlide: {
+          '0%': { transform: 'translateY(-100%)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        bgFadeIn: {
+          '0%': { backgroundColor: 'transparent' },
+          '100%': { backgroundColor: 'rgba(59, 130, 246, 0.12)' },
+        },
+        hoverLift: {
+          '0%': { transform: 'translateY(0)' },
+          '100%': { transform: 'translateY(-1px)' },
         },
       },
       transitionTimingFunction: {

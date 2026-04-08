@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./chat.db"
     database_echo: bool = False
 
-    # Redis
+    # Redis (optional, for future use)
     redis_url: str = "redis://localhost:6379/0"
+
+    # Huey Task Queue Settings
+    huey_sqlite_path: str = "./huey.db"  # Huey SQLite 数据库路径
+    huey_worker_threads: int = 2  # Worker 线程数
 
     # Security
     secret_key: str = "your-secret-key-change-in-production"
@@ -85,9 +89,24 @@ class Settings(BaseSettings):
     deep_research_enable_clarification: bool = True  # 是否启用范围澄清
     deep_research_target_score: float = 0.8  # 信息充足的目标评估分数
     deep_research_default_model: str = "qwen3-max-2026-01-23"  # 推荐使用推理能力强的模型
+    deep_research_daily_limit: int = 5  # 用户每日深度研究次数限制
+    deep_research_poll_interval: int = 3  # 前端轮询间隔（秒）
 
-    # File Storage
+    # Title Generation - Use lightweight model for cost optimization
+    title_generation_model: str = "MiniMax-M2.5"  # 轻量模型，降低成本
+
+    # Sandbox Settings (Local Docker)
+    sandbox_container_image: str = "python:3.12-slim"
+    sandbox_cpu_limit: int = 1  # CPU 核数
+    sandbox_memory_limit: str = "512m"  # 内存限制
+    sandbox_timeout: int = 60  # 执行超时（秒）
+    sandbox_pool_size: int = 3  # 容器池大小
+    sandbox_enabled: bool = False  # 是否启用沙箱（开发阶段默认关闭）
+
+    # File Storage Settings
     upload_dir: str = "./uploads"
+    research_report_dir: str = "./uploads/research"  # 研究报告目录
+    max_report_size: int = 10 * 1024 * 1024  # 最大报告文件大小 (10MB)
     max_file_size: int = 10 * 1024 * 1024  # 10MB
 
     # Doubao ASR (Volcano Engine Speech Recognition)
@@ -102,6 +121,14 @@ class Settings(BaseSettings):
     asr_enable_punctuation: bool = True  # 自动标点
     asr_vad_silence_time: int = 800      # VAD静音阈值(ms)，嘈杂环境建议降低
     asr_enable_vad: bool = True          # VAD语音活动检测
+
+    # Logging Settings
+    log_level: str = "DEBUG"
+    log_dir: str = "./logs"
+    log_file: str = "app.log"
+    log_max_bytes: int = 10 * 1024 * 1024  # 10MB
+    log_backup_count: int = 5
+    log_format: str = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 
     class Config:
         env_file = ".env"

@@ -35,8 +35,9 @@ export function VoiceInput({ onResult, onError, disabled }: VoiceInputProps) {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,  // Auto volume adjustment
-          highPassFilter: true,   // Filter low-frequency noise
+          autoGainControl: true,
+          // Note: highPassFilter is not in standard MediaTrackConstraints type
+          // but is supported by some browsers. Removed for type safety.
           sampleRate: 16000,
           channelCount: 1,        // Force mono for ASR
         }

@@ -20,9 +20,12 @@ Server -> Client messages:
 import asyncio
 import base64
 import json
+import logging
 from fastapi import WebSocket, WebSocketDisconnect, Depends
 from app.core.config import settings
 from app.services.doubao_asr_service import DoubaoASRService, ASRResult
+
+logger = logging.getLogger("app.speech")
 
 
 async def get_asr_service() -> DoubaoASRService:
@@ -120,10 +123,10 @@ async def speech_stream_endpoint(websocket: WebSocket):
 
                 if data["type"] == "start":
                     # Start ASR session
-                    print("[Speech API] Connecting to Doubao ASR...")
+                    logger.info("Connecting to ASR service...")
                     try:
                         connected = await asr_service.connect(on_result, on_error)
-                        print(f"[Speech API] ASR connected: {connected}")
+                        logger.info(f"ASR connection result: {connected}")
 
                         if connected:
                             receiving = True
@@ -135,7 +138,7 @@ async def speech_stream_endpoint(websocket: WebSocket):
                                 "message": "Failed to connect to ASR service"
                             })
                     except Exception as e:
-                        print(f"[Speech API] ASR connection error: {e}")
+                        logger.error(f"ASR connection failed: {e}")
                         await websocket.send_json({
                             "type": "error",
                             "message": f"ASR connection failed: {str(e)}"

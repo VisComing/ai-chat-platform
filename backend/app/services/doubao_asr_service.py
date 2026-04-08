@@ -12,9 +12,12 @@ import gzip
 import json
 import uuid
 import asyncio
+import logging
 from enum import IntEnum
 from typing import Optional, Callable, Any
 import websockets
+
+logger = logging.getLogger("app.asr")
 
 
 class MessageType(IntEnum):
@@ -137,16 +140,16 @@ def parse_server_response(data: bytes) -> dict:
 
     # Parse header (4 bytes)
     header = data[:4]
-    print(f"[ASR Debug] Header bytes: {header.hex()}")
+    logger.debug(f"Header bytes: {header.hex()}")
 
     message_type = (header[1] >> 4) & 0x0F
     compression = header[2] & 0x0F
-    print(f"[ASR Debug] Message type: {message_type}, Compression: {compression}")
+    logger.debug(f"Message type: {message_type}, Compression: {compression}")
 
     # Check if it's an error message
     if message_type == MessageType.ERROR_MESSAGE:
-        print("[ASR Debug] Received ERROR_MESSAGE from server")
-        print(f"[ASR Debug] Total data length: {len(data)}")
+        logger.warning("Received ERROR_MESSAGE from server")
+        logger.debug(f"Total data length: {len(data)}")
 
         if len(data) < 12:
             return {
@@ -158,21 +161,21 @@ def parse_server_response(data: bytes) -> dict:
         # Error format: header + error_code(4B) + error_size(4B) + error_message
         error_code = struct.unpack('>I', data[4:8])[0]
         error_size = struct.unpack('>I', data[8:12])[0]
-        print(f"[ASR Debug] Error code: {error_code}, size: {error_size}")
+        logger.debug(f"Error code: {error_code}, size: {error_size}")
 
         # Error message might be gzip compressed even if outer compression=0
         # Check the error message bytes directly
         error_msg_bytes = data[12:12+error_size]
-        print(f"[ASR Debug] Error message bytes first 10: {error_msg_bytes[:min(10, len(error_msg_bytes))].hex()}")
+        logger.debug(f"Error message bytes first 10: {error_msg_bytes[:min(10, len(error_msg_bytes))].hex()}")
 
         # Check if error message is gzip compressed (magic bytes 1f 8b)
         if len(error_msg_bytes) >= 2 and error_msg_bytes[0] == 0x1f and error_msg_bytes[1] == 0x8b:
-            print("[ASR Debug] Error message is gzip compressed, decompressing...")
+            logger.debug("Error message is gzip compressed, decompressing...")
             try:
                 error_msg = gzip.decompress(error_msg_bytes).decode('utf-8')
-                print(f"[ASR Debug] Decompressed error message: {error_msg}")
+                logger.debug(f"Decompressed error message: {error_msg}")
             except Exception as e:
-                print(f"[ASR Debug] Decompression failed: {e}")
+                logger.error(f"Decompression failed: {e}")
                 error_msg = error_msg_bytes.decode('utf-8', errors='replace')
         else:
             # Not compressed, decode directly
@@ -181,7 +184,7 @@ def parse_server_response(data: bytes) -> dict:
             except UnicodeDecodeError:
                 error_msg = error_msg_bytes.decode('utf-8', errors='replace')
 
-        print(f"[ASR Debug] Final error message: {error_msg}")
+        logger.error(f"Server error: {error_msg}")
         return {
             "code": error_code,
             "message": error_msg,
@@ -190,17 +193,17 @@ def parse_server_response(data: bytes) -> dict:
 
     # Parse payload size (4 bytes, big-endian)
     payload_size = struct.unpack('>I', data[4:8])[0]
-    print(f"[ASR Debug] Payload size: {payload_size}")
+    logger.debug(f"Payload size: {payload_size}")
 
     # Extract and decompress payload
     payload_compressed = data[8:8+payload_size]
-    print(f"[ASR Debug] Payload first 4 bytes: {payload_compressed[:4].hex() if len(payload_compressed) >= 4 else payload_compressed.hex()}")
+    logger.debug(f"Payload first 4 bytes: {payload_compressed[:4].hex() if len(payload_compressed) >= 4 else payload_compressed.hex()}")
 
     # Check if data is gzip compressed (magic bytes: 1f 8b)
     is_gzip = len(payload_compressed) >= 2 and payload_compressed[0] == 0x1f and payload_compressed[1] == 0x8b
 
     if compression == Compression.GZIP or is_gzip:
-        print("[ASR Debug] Decompressing gzip payload")
+        logger.debug("Decompressing gzip payload")
         payload = gzip.decompress(payload_compressed)
     else:
         payload = payload_compressed
@@ -293,7 +296,7 @@ class DoubaoASRService:
         try:
             # Build URL with appid parameter
             ws_url = f"{self.WS_URL}?appid={self.appid}"
-            print(f"[DoubaoASR] Connecting to {ws_url}...")
+            logger.info(f"Connecting to ASR service: {ws_url}")
 
             # Build authorization header with Access Token
             headers = {
@@ -309,16 +312,16 @@ class DoubaoASRService:
                 additional_headers=headers,
             )
 
-            print("[DoubaoASR] WebSocket connected, sending config...")
+            logger.info("WebSocket connected, sending config...")
 
             # Build and send full client request
             config = self._build_config()
-            print(f"[DoubaoASR] Config: appid={self.appid}, cluster={self.cluster}")
+            logger.debug(f"Config: appid={self.appid}, cluster={self.cluster}")
             request = build_full_client_request(config)
-            print(f"[DoubaoASR] Request size: {len(request)} bytes")
+            logger.debug(f"Request size: {len(request)} bytes")
             await self.ws.send(request)
 
-            print("[DoubaoASR] Config sent, starting receive loop...")
+            logger.info("Config sent, starting receive loop...")
 
             # Start receiving loop
             self._receive_task = asyncio.create_task(
@@ -329,7 +332,7 @@ class DoubaoASRService:
             return True
 
         except Exception as e:
-            print(f"[DoubaoASR] Connection error: {type(e).__name__}: {e}")
+            logger.error(f"Connection error: {type(e).__name__}: {e}")
             on_error(f"Connection error: {str(e)}")
             return False
 
@@ -401,28 +404,28 @@ class DoubaoASRService:
         try:
             while self.ws and self._connected:
                 data = await self.ws.recv()
-                print(f"[DoubaoASR] Received {len(data)} bytes")
+                logger.debug(f"Received {len(data)} bytes")
 
                 # Parse response
                 try:
                     response = parse_server_response(data)
-                    print(f"[DoubaoASR] Parsed response: {response.get('code', 'N/A')}")
+                    logger.debug(f"Parsed response: code={response.get('code', 'N/A')}")
                 except Exception as parse_err:
-                    print(f"[DoubaoASR] Parse error: {parse_err}")
+                    logger.error(f"Parse error: {parse_err}")
                     on_error(f"Parse error: {str(parse_err)}")
                     continue
 
                 # Check for errors
                 if response.get("is_error") or response.get("code") != 1000:
                     error_msg = response.get("message", "Unknown error")
-                    print(f"[DoubaoASR] Error response: {error_msg}")
+                    logger.warning(f"Error response: {error_msg}")
                     on_error(error_msg)
                     continue
 
                 # Extract result
                 result = extract_result_from_response(response)
                 if result and result.text:
-                    print(f"[DoubaoASR] Result: '{result.text}', is_final={result.is_final}")
+                    logger.info(f"Recognition: '{result.text}' (final={result.is_final})")
                     on_result(result)
 
         except websockets.exceptions.ConnectionClosed:

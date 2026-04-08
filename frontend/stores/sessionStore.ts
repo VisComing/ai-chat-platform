@@ -14,7 +14,7 @@ interface SessionState {
   // Actions
   init: () => Promise<void>
   createSession: (title?: string) => Promise<Session>
-  selectSession: (sessionId: string) => void
+  selectSession: (sessionId: string | null) => void
   updateSession: (sessionId: string, updates: Partial<Session>) => void
   updateSessionTitle: (sessionId: string, title: string) => void
   deleteSession: (sessionId: string) => Promise<void>
@@ -84,7 +84,12 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      selectSession: (sessionId: string) => {
+      selectSession: (sessionId: string | null) => {
+        if (sessionId === null) {
+          // Allow clearing selection
+          set({ currentSessionId: null })
+          return
+        }
         const { sessions } = get()
         // Verify session exists
         const session = sessions.find(s => s.id === sessionId)

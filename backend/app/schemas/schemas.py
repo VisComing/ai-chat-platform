@@ -275,3 +275,115 @@ class FileResponse(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
+
+
+# ============= Research Task Schemas =============
+
+class SubTaskProgress(BaseModel):
+    """子任务进度"""
+    topic: str
+    status: str  # pending, in_progress, completed
+    iteration: Optional[int] = None
+    score: Optional[float] = None
+
+
+class ResearchProgress(BaseModel):
+    """研究进度"""
+    currentTask: Optional[int] = None
+    totalTasks: Optional[int] = None
+    iteration: Optional[int] = None
+    maxIterations: Optional[int] = None
+    collectedInfoCount: Optional[int] = None
+    citationCount: Optional[int] = None
+
+
+class Citation(BaseModel):
+    """引用来源"""
+    title: str
+    link: str
+    publishedTime: Optional[str] = Field(None, alias="published_time")
+    snippet: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ResearchTaskCreate(BaseModel):
+    """创建研究任务请求"""
+    query: str
+    model: Optional[str] = None
+    sessionId: Optional[str] = Field(None, alias="session_id")
+    skipClarification: bool = Field(False, alias="skip_clarification")
+
+    class Config:
+        populate_by_name = True
+
+
+class ResearchTaskCreated(BaseModel):
+    """研究任务创建响应"""
+    taskId: str
+    status: str
+    estimatedDuration: str = "15-30 minutes"
+    estimatedCost: Optional[dict] = None
+    message: str
+
+
+class ResearchTaskStatus(BaseModel):
+    """研究任务状态响应"""
+    taskId: str = Field(alias="id")
+    status: str
+    phase: str
+    phaseStatus: str = Field(alias="phase_status")
+    phaseMessage: Optional[str] = Field(None, alias="phase_message")
+    progress: Optional[ResearchProgress] = None
+    subTasks: Optional[List[SubTaskProgress]] = Field(None, alias="sub_tasks")
+    elapsedTime: Optional[int] = None  # 秒
+    estimatedRemaining: Optional[int] = None  # 秒
+    citations: Optional[List[Citation]] = None
+    clarificationQuestions: Optional[List[str]] = Field(None, alias="clarification_questions")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class ClarificationRequest(BaseModel):
+    """澄清回复请求"""
+    answers: List[str]
+
+
+class ResearchTaskResult(BaseModel):
+    """研究任务结果响应"""
+    taskId: str
+    status: str
+    reportUrl: Optional[str] = Field(None, alias="result_url")
+    reportPreview: Optional[str] = Field(None, alias="report_preview")
+    citations: Optional[List[Citation]] = None
+    stats: Optional[dict] = None  # {duration, totalSearches, totalIterations}
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class ResearchTaskListItem(BaseModel):
+    """研究任务列表项"""
+    taskId: str = Field(alias="id")
+    query: str
+    status: str
+    phase: str
+    createdAt: datetime = Field(alias="created_at")
+    completedAt: Optional[datetime] = Field(None, alias="completed_at")
+    resultUrl: Optional[str] = Field(None, alias="result_url")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class UserQuotaStatus(BaseModel):
+    """用户配额状态"""
+    dailyLimit: int
+    dailyUsed: int
+    dailyRemaining: int
+    totalTasks: int

@@ -292,168 +292,67 @@ export function InputArea({
   const canSend = (input.trim().length > 0 || images.some(img => img.status === 'ready')) && !isOverLimit && !disabled
 
   return (
-    <div className="border-t border-secondary-200 bg-white dark:bg-secondary-900">
+    <div className="border-t border-transparent bg-white dark:bg-[#0f0f1a]">
       {/* Settings Bar */}
       {showSettings && (
-        <div className="px-4 py-2 border-b border-secondary-100 flex items-center justify-end">
+        <div className="px-4 py-2 border-b border-[#f5f5f5] dark:border-white/5 flex items-center justify-end">
           <button
             onClick={onSettingsClick}
-            className="p-1 text-secondary-400 hover:text-secondary-600"
+            className="p-1 text-[#94a3b8] hover:text-[#212121] dark:hover:text-white"
           >
             <Settings className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Input Area - 悬浮卡片设计 */}
-      <div className="p-4">
-        {/* Image Preview Area */}
-        {images.length > 0 && (
-          <div className="flex gap-2 mb-3 p-2 bg-secondary-50 dark:bg-secondary-800 rounded-lg flex-wrap">
-            {images.map(img => (
-              <div key={img.id} className="relative w-16 h-16 group">
-                <img
-                  src={img.url}
-                  alt={img.name}
-                  className="w-full h-full object-cover rounded border border-secondary-200 dark:border-secondary-700"
-                />
-                {/* Status overlay */}
-                {img.status === 'uploading' && (
-                  <div className="absolute inset-0 bg-black/50 rounded flex items-center justify-center">
-                    <Loader2 className="w-4 h-4 text-white animate-spin" />
-                  </div>
-                )}
-                {img.status === 'error' && (
-                  <div className="absolute inset-0 bg-red-500/50 rounded flex items-center justify-center">
-                    <X className="w-4 h-4 text-white" />
-                  </div>
-                )}
-                {/* Remove button */}
-                <button
-                  onClick={() => removeImage(img.id)}
-                  className="absolute -top-1 -right-1 bg-red-500 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                  type="button"
-                >
-                  <X className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Main Input Container - 玻璃拟态卡片样式 */}
+      {/* Input Area - 极简居中设计 */}
+      <div className="p-4 flex justify-center">
         <div
           className={cn(
-            'flex items-end gap-3 rounded-2xl glass p-3',
-            'shadow-sm hover:shadow-md focus-within:shadow-lg',
-            'focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/20',
+            'w-full max-w-[720px] rounded-[24px] bg-white dark:bg-[#1a1a2e]',
+            'border border-[#e5e7eb] dark:border-white/[0.08]',
+            'shadow-[0_4px_24px_rgba(0,0,0,0.08)]',
             'transition-all duration-200',
-            isDragging && 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-500/30'
+            isDragging && 'border-[#3b82f6] ring-2 ring-[#3b82f6]/20'
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* Toolbar */}
-          <div className="flex items-center gap-1 pb-1">
-            {/* Deep Thinking Toggle */}
-            {onThinkingChange && (
-              <button
-                onClick={() => onThinkingChange(!enableThinking)}
-                disabled={!isThinkingModel(selectedModel)}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  !isThinkingModel(selectedModel)
-                    ? 'text-secondary-300 cursor-not-allowed opacity-50'
-                    : enableThinking
-                      ? 'text-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                      : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100'
-                )}
-                title={!isThinkingModel(selectedModel) ? '当前模型不支持深度思考' : enableThinking ? '深度思考已启用' : '启用深度思考'}
-                type="button"
-              >
-                <Brain className="w-5 h-5" />
-              </button>
-            )}
-            {/* Agent Mode Toggle */}
-            {onAgentChange && (
-              <button
-                onClick={() => onAgentChange(!useAgent)}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  useAgent
-                    ? 'text-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100'
-                )}
-                title={useAgent ? '联网搜索已启用' : '启用联网搜索'}
-                type="button"
-              >
-                <Globe className="w-5 h-5" />
-              </button>
-            )}
-            {/* Deep Research Toggle */}
-            {onDeepResearchChange && (
-              <button
-                onClick={() => onDeepResearchChange(!enableDeepResearch)}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  enableDeepResearch
-                    ? 'text-teal-500 bg-teal-50 dark:bg-teal-900/20'
-                    : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100'
-                )}
-                title={enableDeepResearch ? '深度研究已启用' : '启用深度研究（完整研究报告）'}
-                type="button"
-              >
-                <BookOpen className="w-5 h-5" />
-              </button>
-            )}
-            {/* Image Upload Button */}
-            <button
-              onClick={handleImageButtonClick}
-              disabled={!multimodalSupported}
-              className={cn(
-                'p-2 rounded-lg transition-colors',
-                !multimodalSupported
-                  ? 'text-secondary-300 cursor-not-allowed opacity-50'
-                  : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100'
-              )}
-              title={!multimodalSupported ? '当前模型不支持图片理解' : '上传图片（支持粘贴、拖拽）'}
-              type="button"
-            >
-              <Image className="w-5 h-5" />
-            </button>
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/gif,image/webp"
-              onChange={handleFileInputChange}
-              className="hidden"
-              multiple
-            />
-            <ToolbarButton icon={<FileText className="w-5 h-5" />} title="上传文件" />
-            {/* Voice Input */}
-            <VoiceInput
-              onResult={(text, isFinal) => {
-                if (isFinal) {
-                  // Final result: append to input
-                  setInput(prev => prev ? `${prev} ${text}` : text)
-                  setTimeout(() => textareaRef.current?.focus(), 0)
-                } else {
-                  // Interim result: show in component, don't modify input yet
-                  // The VoiceInput component handles interim display internally
-                }
-              }}
-              onError={(error) => {
-                console.warn('[InputArea] Voice input error:', error)
-              }}
-              disabled={disabled || isLoading}
-            />
-            <ToolbarButton icon={<Smile className="w-5 h-5" />} title="表情" />
-          </div>
+          {/* Image Preview Area */}
+          {images.length > 0 && (
+            <div className="flex gap-2 p-4 pb-0 flex-wrap">
+              {images.map(img => (
+                <div key={img.id} className="relative w-16 h-16 group">
+                  <img
+                    src={img.url}
+                    alt={img.name}
+                    className="w-full h-full object-cover rounded-lg border border-[#e5e7eb] dark:border-white/10"
+                  />
+                  {img.status === 'uploading' && (
+                    <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 text-white animate-spin" />
+                    </div>
+                  )}
+                  {img.status === 'error' && (
+                    <div className="absolute inset-0 bg-red-500/50 rounded-lg flex items-center justify-center">
+                      <X className="w-4 h-4 text-white" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeImage(img.id)}
+                    className="absolute -top-1 -right-1 bg-red-500 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    type="button"
+                  >
+                    <X className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
-          {/* Text Input */}
-          <div className="flex-1">
+          {/* Textarea */}
+          <div className="p-4">
             <textarea
               ref={textareaRef}
               value={input}
@@ -464,105 +363,158 @@ export function InputArea({
               disabled={disabled}
               rows={1}
               className={cn(
-                'w-full resize-none bg-transparent outline-none text-secondary-900 dark:text-white placeholder:text-secondary-400',
-                'max-h-[200px] overflow-y-auto'
+                'w-full resize-none bg-transparent outline-none',
+                'text-[#212121] dark:text-white placeholder:text-[#94a3b8]',
+                'max-h-[200px] overflow-y-auto',
+                'text-base leading-relaxed'
               )}
               style={{ minHeight: '24px' }}
             />
           </div>
 
-          {/* Character Count */}
-          <div className="flex items-center gap-2">
-            {input.length > maxLength * 0.8 && (
-              <span
-                className={cn(
-                  'text-xs',
-                  isOverLimit ? 'text-error' : 'text-secondary-400'
-                )}
-              >
-                {input.length}/{maxLength}
-              </span>
-            )}
-
-            {/* Stop Button */}
-            {isLoading ? (
-              <button
-                onClick={onStop}
-                className="w-10 h-10 rounded-full bg-primary-500 text-white
-                           hover:bg-primary-600 transition-colors flex items-center justify-center"
-                title="停止生成"
-                type="button"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!canSend}
-                className={cn(
-                  'w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 shimmer-container',
-                  !canSend
-                    // 禁用态：灰色半透明
-                    ? 'bg-secondary-300 text-secondary-500 opacity-60 cursor-not-allowed'
-                    // 有输入时：品牌色渐变 + 发光效果
-                    : 'bg-gradient-to-r from-primary-500 to-accent-500 text-white glow-primary hover:scale-105'
-                )}
-                title={canSend ? '发送' : '请输入内容'}
-                type="button"
-              >
-                <Send className="w-5 h-5 relative z-10" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Model Selector */}
-        {showModelSelector && onModelChange && (
-          <div className="flex items-center justify-between mt-2 px-1">
-            <ModelSelector
-              selectedModel={selectedModel}
-              onModelChange={onModelChange}
-              disabled={isLoading || disabled}
-            />
-          </div>
-        )}
-
-        {/* Hints */}
-        <div className="flex items-center justify-between mt-2 px-1">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-secondary-400">
-              按 Enter 发送，Shift + Enter 换行
-            </span>
+          {/* Bottom Bar - 功能按钮左下角 */}
+          <div className="flex items-center justify-between px-4 pb-4">
+            {/* Left: Feature Buttons */}
             <div className="flex items-center gap-2">
-              {enableThinking && (
-                <span className="text-xs text-purple-500 flex items-center gap-1">
-                  <Brain className="w-3 h-3" />
-                  深度思考
+              {/* Deep Thinking Toggle */}
+              {onThinkingChange && (
+                <button
+                  onClick={() => onThinkingChange(!enableThinking)}
+                  disabled={!isThinkingModel(selectedModel)}
+                  className={cn(
+                    'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                    !isThinkingModel(selectedModel)
+                      ? 'text-[#d1d5db] cursor-not-allowed'
+                      : enableThinking
+                        ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
+                        : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+                  )}
+                  title={!isThinkingModel(selectedModel) ? '当前模型不支持深度思考' : enableThinking ? '深度思考已启用' : '启用深度思考'}
+                  type="button"
+                >
+                  <Brain className="w-4 h-4" />
+                  <span className="hidden sm:inline">深度思考</span>
+                </button>
+              )}
+              {/* Agent Mode Toggle */}
+              {onAgentChange && (
+                <button
+                  onClick={() => onAgentChange(!useAgent)}
+                  className={cn(
+                    'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                    useAgent
+                      ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
+                      : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+                  )}
+                  title={useAgent ? '联网搜索已启用' : '启用联网搜索'}
+                  type="button"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span className="hidden sm:inline">联网搜索</span>
+                </button>
+              )}
+              {/* Image Upload Button */}
+              <button
+                onClick={handleImageButtonClick}
+                disabled={!multimodalSupported}
+                className={cn(
+                  'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+                  !multimodalSupported
+                    ? 'text-[#d1d5db] cursor-not-allowed'
+                    : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+                )}
+                title={!multimodalSupported ? '当前模型不支持图片理解' : '上传图片'}
+                type="button"
+              >
+                <Image className="w-4 h-4" />
+              </button>
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={handleFileInputChange}
+                className="hidden"
+                multiple
+              />
+            </div>
+
+            {/* Right: Send Button */}
+            <div className="flex items-center gap-2">
+              {input.length > maxLength * 0.8 && (
+                <span
+                  className={cn(
+                    'text-xs',
+                    isOverLimit ? 'text-red-500' : 'text-[#94a3b8]'
+                  )}
+                >
+                  {input.length}/{maxLength}
                 </span>
               )}
-              {useAgent && (
-                <span className="text-xs text-primary-500 flex items-center gap-1">
-                  <Globe className="w-3 h-3" />
-                  联网搜索
-                </span>
-              )}
-              {enableDeepResearch && (
-                <span className="text-xs text-teal-500 flex items-center gap-1">
-                  <BookOpen className="w-3 h-3" />
-                  深度研究
-                </span>
-              )}
-              {multimodalSupported && (
-                <span className="text-xs text-green-500 flex items-center gap-1">
-                  <Image className="w-3 h-3" />
-                  支持图片
-                </span>
+
+              {/* Stop Button */}
+              {isLoading ? (
+                <button
+                  onClick={onStop}
+                  className="w-11 h-11 rounded-full bg-[#3b82f6] text-white
+                             hover:bg-[#2563eb] transition-colors flex items-center justify-center"
+                  title="停止生成"
+                  type="button"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  className={cn(
+                    'w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200',
+                    !canSend
+                      ? 'bg-[#e5e7eb] dark:bg-white/5 text-[#94a3b8] cursor-not-allowed'
+                      : 'bg-[#3b82f6] text-white hover:bg-[#2563eb] hover:scale-105'
+                  )}
+                  title={canSend ? '发送' : '请输入内容'}
+                  type="button"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
               )}
             </div>
           </div>
-          {isLoading && (
-            <span className="text-xs text-primary-500 animate-pulse">
-              {enableDeepResearch ? '深度研究进行中...' : enableThinking ? '深度思考中...' : useAgent ? 'Agent正在搜索和思考...' : 'AI正在思考中...'}
+        </div>
+      </div>
+
+      {/* Model Selector */}
+      {showModelSelector && onModelChange && (
+        <div className="flex items-center justify-center pb-2">
+          <ModelSelector
+            selectedModel={selectedModel}
+            onModelChange={onModelChange}
+            disabled={isLoading || disabled}
+          />
+        </div>
+      )}
+
+      {/* Hints */}
+      <div className="flex items-center justify-center pb-3">
+        <div className="flex items-center gap-3 text-xs text-[#94a3b8]">
+          <span>按 Enter 发送，Shift + Enter 换行</span>
+          {enableThinking && (
+            <span className="text-[#3b82f6] flex items-center gap-1">
+              <Brain className="w-3 h-3" />
+              深度思考
+            </span>
+          )}
+          {useAgent && (
+            <span className="text-[#3b82f6] flex items-center gap-1">
+              <Globe className="w-3 h-3" />
+              联网搜索
+            </span>
+          )}
+          {multimodalSupported && (
+            <span className="text-green-500 flex items-center gap-1">
+              <Image className="w-3 h-3" />
+              支持图片
             </span>
           )}
         </div>

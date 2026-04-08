@@ -25,6 +25,7 @@ class AgentState(TypedDict):
     """Agent 状态定义"""
     messages: Annotated[List[BaseMessage], add_messages]  # 对话历史，自动追加
     search_results: Optional[List[Dict[str, str]]]  # 搜索结果
+    search_query: Optional[str]  # 实际搜索关键词（LLM 提炼的）
     should_search: Optional[bool]  # 是否需要搜索
     final_response: Optional[str]  # 最终回复
     citations: Optional[List[Dict[str, str]]]  # 引用列表
@@ -46,11 +47,11 @@ async def web_search(query: str, time_range: str = "NoLimit") -> str:
     Args:
         query: 搜索关键词
         time_range: 时间范围，可选值：
-            - "OneDay": 过去一天内（适用于"今天"、"现在"、"实时"等）
-            - "OneWeek": 过去一周内（适用于"最近"、"本周"、"最新新闻"等）
-            - "OneMonth": 过去一个月内（适用于"近一个月"、"近期"等）
-            - "OneYear": 过去一年内（适用于"今年"、"近一年"等）
-            - "NoLimit": 不限时间（适用于历史事实、通用知识等）
+            - "OneDay": 过去一天内
+            - "OneWeek": 过去一周内
+            - "OneMonth": 过去一个月内
+            - "OneYear": 过去一年内
+            - "NoLimit": 不限时间
             默认为 "NoLimit"
 
     Returns:
@@ -181,23 +182,24 @@ class AgentService:
                             time_range=actual_time_range
                         )
                         logger.info(f"[Tools Node] Search returned {len(results)} results")
-                        
+
                         # 保存搜索结果
                         search_results = [r.to_dict() for r in results]
-                        
+
                         # 格式化结果
                         result_text = search_service.format_results_for_llm(results)
-                        
+
                         # 创建工具响应消息
                         tool_message = {
                             "role": "tool",
                             "content": result_text,
                             "tool_call_id": tool_call["id"]
                         }
-                        
+
                         return {
                             "messages": [AIMessage(content=result_text)],
-                            "search_results": search_results
+                            "search_results": search_results,
+                            "search_query": query  # 保存实际搜索关键词
                         }
                         
                     except Exception as e:
@@ -312,13 +314,16 @@ class AgentService:
             
             # 转换消息格式
             langchain_messages = []
-            for msg in messages:
+            logger.info(f"[Agent] Converting {len(messages)} messages to langchain format")
+            for i, msg in enumerate(messages):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
 
                 # Handle dict content format (e.g., {"type": "text", "text": "..."})
                 if isinstance(content, dict):
                     content = content.get("text", str(content))
+
+                logger.info(f"[Agent] Message {i}: role={role}, content_preview={str(content)[:50]}")
 
                 if role == "user":
                     langchain_messages.append(HumanMessage(content=content))
@@ -329,6 +334,7 @@ class AgentService:
             initial_state = {
                 "messages": langchain_messages,
                 "search_results": None,
+                "search_query": None,
                 "should_search": None,
                 "final_response": None,
                 "citations": None,
@@ -338,14 +344,25 @@ class AgentService:
             # 使用 astream 流式执行图
             search_results = []
             # 提取用户消息内容（处理字典格式）
-            raw_content = messages[-1].get("content", "") if messages else ""
-            if isinstance(raw_content, dict):
-                search_query = raw_content.get("text", str(raw_content))
+            # 注意：messages 是从 chat_service 传来的，最后一条应该是用户消息
+            logger.info(f"[Agent] Total messages received: {len(messages)}")
+            for i, msg in enumerate(messages):
+                content_preview = str(msg.get("content", ""))[:50]
+                logger.info(f"[Agent] Message {i}: role={msg.get('role')}, content_preview={content_preview}")
+
+            if messages:
+                raw_content = messages[-1].get("content", "")
+                logger.info(f"[Agent] Last message raw_content type: {type(raw_content)}, value: {raw_content}")
+                if isinstance(raw_content, dict):
+                    search_query = raw_content.get("text", str(raw_content))
+                else:
+                    search_query = str(raw_content) if raw_content else ""
             else:
-                search_query = str(raw_content)
+                search_query = ""
+
             final_response_text = ""
-            
-            logger.info(f"[Chat] Starting graph execution with query: {search_query}")
+
+            logger.info(f"[Chat] Starting graph execution with query: '{search_query}'")
 
             async for event in self.graph.astream(initial_state):
                 logger.info(f"[Chat] Graph event: {event.keys()}")
@@ -356,6 +373,8 @@ class AgentService:
                         # 检查是否有搜索结果
                         if "search_results" in node_output and node_output["search_results"]:
                             search_results = node_output["search_results"]
+                            # 使用实际搜索关键词（LLM 提炼的），而非用户原始消息
+                            actual_search_query = node_output.get("search_query", search_query)
 
                             # 构建来源数据
                             sources = []
@@ -376,7 +395,8 @@ class AgentService:
                                     "type": "tool_call",
                                     "tool": "web_search",
                                     "toolName": "web_search",
-                                    "toolArgs": {"query": search_query},
+                                    "query": actual_search_query,  # 实际搜索关键词
+                                    "toolArgs": {"query": actual_search_query},
                                     "resultCount": len(search_results),
                                     "sources": sources
                                 }
@@ -402,14 +422,7 @@ class AgentService:
 
             response_text = final_response_text
 
-            # 如果有搜索结果，添加引用
-            if search_results:
-                citations_text = "\n\n---\n**参考来源：**\n"
-                for i, result in enumerate(search_results, 1):
-                    title = result.get('title', 'No title')
-                    link = result.get('link', '')
-                    citations_text += f"[{i}] [{title}]({link})\n"
-                response_text += citations_text
+            # 前端 SourcesSection 会渲染 sources，不需要在文本中追加 Markdown 引用
 
             # 如果启用深度思考模式，使用 ai_service 生成带 thinking 的回答
             if enable_thinking:

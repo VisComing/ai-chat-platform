@@ -242,6 +242,9 @@ export const useChatStore = create<ChatState>()(
                 const currentMessage = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
                 const existingMetadata = currentMessage?.metadata || {}
 
+                // 从 complete 事件直接获取 sources（后端发送格式）
+                const completeSources = chunk.sources || chunk.metadata?.sources || existingMetadata.sources || []
+
                 set({
                   isLoading: false,
                   streamingMessageId: null,
@@ -255,9 +258,9 @@ export const useChatStore = create<ChatState>()(
                             metadata: {
                               ...existingMetadata,
                               ...chunk.metadata,
-                              // Include sources from complete event if present
-                              sources: chunk.metadata?.sources || existingMetadata.sources || [],
-                              searchUsed: chunk.metadata?.search_used ?? existingMetadata.searchUsed ?? false,
+                              // Include sources from complete event
+                              sources: completeSources,
+                              searchUsed: chunk.metadata?.search_used ?? chunk.search_used ?? existingMetadata.searchUsed ?? false,
                             },
                           }
                         : msg

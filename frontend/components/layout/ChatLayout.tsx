@@ -71,42 +71,13 @@ export function ChatLayout() {
               console.log('No messages for session:', urlSessionId)
             }
           } else {
-            // Session not found - show error and redirect
+            // Session not found - show error and go to start page
             toast.error('该会话不存在或已被删除')
-
-            // Redirect to first available session or create new one
-            const state = useSessionStore.getState()
-            if (state.sessions.length > 0) {
-              const latestSession = state.sessions[0]
-              selectSession(latestSession.id)
-              useChatStore.getState().setCurrentSession(latestSession.id)
-              window.history.replaceState(null, '', `/chat/${latestSession.id}`)
-            } else {
-              window.history.replaceState(null, '', '/')
-            }
-          }
-        } else {
-          // No session in URL - load or create default
-          const state = useSessionStore.getState()
-
-          if (state.sessions.length > 0) {
-            const latestSession = state.sessions[0]
-            selectSession(latestSession.id)
-            useChatStore.getState().setCurrentSession(latestSession.id)
-            try {
-              await useChatStore.getState().loadMessages(latestSession.id)
-            } catch (e) {
-              console.log('No messages for session:', latestSession.id)
-            }
-            // Update URL without navigation
-            window.history.replaceState(null, '', `/chat/${latestSession.id}`)
-          } else {
-            const session = await createSession()
-            selectSession(session.id)
-            useChatStore.getState().setCurrentSession(session.id)
-            window.history.replaceState(null, '', `/chat/${session.id}`)
+            window.history.replaceState(null, '', '/')
           }
         }
+        // If no session in URL (root path), stay on start page
+        // Don't auto-load or create session - wait for user to send message
       } catch (error) {
         console.error('Initialization error:', error)
       } finally {
@@ -115,17 +86,18 @@ export function ChatLayout() {
       }
     }
     init()
-  }, [router, initSessions, selectSession, createSession])
+  }, [router, initSessions, selectSession])
 
-  // Handle new chat - create session and update URL
+  // Handle new chat - clear current session and show start page
   const handleNewChat = useCallback(async () => {
-    const session = await createSession()
-    selectSession(session.id)
-    useChatStore.getState().setCurrentSession(session.id)
+    // Clear current session - don't create new session yet
+    // Session will be created when user sends first message
+    useSessionStore.getState().selectSession(null) // Clear selection
+    useChatStore.getState().setCurrentSession(null)
     useChatStore.getState().clearMessages()
-    // Update URL without full navigation
-    window.history.pushState(null, '', `/chat/${session.id}`)
-  }, [createSession, selectSession])
+    // Update URL to root path (shows start page)
+    window.history.pushState(null, '', '/')
+  }, [])
 
   // Handle session selection - update state and URL
   const handleSelectSession = useCallback(async (sessionId: string) => {

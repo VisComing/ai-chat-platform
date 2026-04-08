@@ -48,18 +48,18 @@ export function MessageBubble({
     <div
       className={cn(
         'flex gap-3 py-4 px-4 animate-message-enter',
-        isUser ? 'flex-row-reverse' : 'flex-row'
+        isUser ? 'flex-row' : 'flex-row' // 统一左侧对齐
       )}
     >
       {/* Avatar */}
       {isUser ? (
-        // 用户头像 - 蓝紫渐变圆形
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-accent-400 flex items-center justify-center shadow-sm">
+        // 用户头像 - 品牌蓝圆形
+        <div className="w-9 h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
           <span className="text-white text-sm font-medium">U</span>
         </div>
       ) : (
-        // AI 头像 - 蓝紫渐变 + Bot 图标 + pulse-glow 动画
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-sm animate-pulse-glow">
+        // AI 头像 - 品牌蓝 + Bot 图标
+        <div className="w-9 h-9 rounded-full bg-[#3b82f6] flex items-center justify-center shrink-0">
           <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z" />
             <circle cx="8" cy="14" r="2" />
@@ -69,15 +69,10 @@ export function MessageBubble({
       )}
 
       {/* Message Content */}
-      <div
-        className={cn(
-          'flex-1 max-w-[70%]',
-          isUser ? 'items-end' : 'items-start'
-        )}
-      >
+      <div className="flex-1 min-w-0">
         {/* Search Indicator */}
         {!isUser && message.metadata?.searchUsed && (
-          <SearchIndicator 
+          <SearchIndicator
             query={message.metadata.searchQuery || ''}
             resultCount={message.metadata.searchResultCount || 0}
             isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
@@ -95,68 +90,61 @@ export function MessageBubble({
 
         {/* Tool Call Notification */}
         {!isUser && message.metadata?.toolCall && !isStreaming && (
-          <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm flex items-center gap-2">
-            <Search className="w-4 h-4 text-blue-500" />
-            <span className="text-blue-600 dark:text-blue-400">
+          <div className="mb-2 p-2 bg-[#3b82f6]/8 rounded-lg text-sm flex items-center gap-2">
+            <Search className="w-4 h-4 text-[#3b82f6]" />
+            <span className="text-[#3b82f6]">
               已调用搜索工具获取最新信息
             </span>
           </div>
         )}
 
-        {/* Message Bubble */}
+        {/* Message Bubble - 用户消息无背景 */}
         <div
           className={cn(
-            'rounded-2xl px-4 py-3 relative group',
+            'relative group',
             isUser
-              // 用户消息：渐变背景 + 白色文字 + 右上角小圆角
-              ? 'bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-tr-sm max-w-[70%]'
+              ? 'text-[#212121] dark:text-white' // 用户消息：无背景，直接显示文字
               : isError
-              ? 'bg-error-light text-error rounded-tl-sm'
-              // AI 消息：浅色背景 + 左上角小圆角
-              : 'bg-secondary-100 dark:bg-secondary-800 text-secondary-900 dark:text-white rounded-tl-sm max-w-[85%]'
+              ? 'text-red-500'
+              : 'text-[#212121] dark:text-white' // AI 消息：无背景
           )}
         >
           {/* Content */}
           <MessageContent content={message.content} isUser={isUser} />
-          
+
           {/* Streaming Indicator */}
           {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-primary-500 animate-pulse ml-1" />
+            <span className="inline-block w-2 h-4 bg-[#3b82f6] animate-pulse ml-1 rounded-sm" />
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions - hover 显示 */}
         {showActions && !isUser && message.status === 'completed' && (
-          <div
-            className={cn(
-              'flex items-center gap-1 mt-1 transition-opacity',
-              showAllActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-            )}
-          >
+          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={handleCopy}
-              className="p-1.5 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded transition-colors"
+              className="p-1.5 text-[#94a3b8] hover:text-[#212121] hover:bg-[#f5f5f5] dark:hover:bg-white/10 rounded transition-colors"
               title="复制"
             >
               {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             </button>
             <button
               onClick={onRegenerate}
-              className="p-1.5 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded transition-colors"
+              className="p-1.5 text-[#94a3b8] hover:text-[#212121] hover:bg-[#f5f5f5] dark:hover:bg-white/10 rounded transition-colors"
               title="重新生成"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
             <button
               onClick={() => onFeedback?.('like')}
-              className="p-1.5 text-secondary-400 hover:text-success hover:bg-success-light rounded transition-colors"
+              className="p-1.5 text-[#94a3b8] hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 rounded transition-colors"
               title="好评"
             >
               <ThumbsUp className="w-4 h-4" />
             </button>
             <button
               onClick={() => onFeedback?.('dislike')}
-              className="p-1.5 text-secondary-400 hover:text-error hover:bg-error-light rounded transition-colors"
+              className="p-1.5 text-[#94a3b8] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded transition-colors"
               title="差评"
             >
               <ThumbsDown className="w-4 h-4" />
@@ -165,18 +153,13 @@ export function MessageBubble({
         )}
 
         {/* Meta Info */}
-        <div
-          className={cn(
-            'flex items-center gap-2 mt-1 text-xs text-secondary-400',
-            isUser ? 'justify-end' : 'justify-start'
-          )}
-        >
+        <div className="flex items-center gap-2 mt-1 text-xs text-[#94a3b8]">
           <span>{formatTime(message.createdAt)}</span>
           {message.metadata?.model && (
-            <span className="text-secondary-300">{message.metadata.model}</span>
+            <span className="text-[#64748b]">{message.metadata.model}</span>
           )}
           {message.metadata?.tokens && (
-            <span className="text-secondary-300">
+            <span className="text-[#64748b]">
               {message.metadata.tokens.input + message.metadata.tokens.output} tokens
             </span>
           )}

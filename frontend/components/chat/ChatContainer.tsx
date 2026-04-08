@@ -1,11 +1,15 @@
 'use client'
 
 import * as React from 'react'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { useChatStore, useMessages } from '@/stores/chatStore'
 import { useSessionStore, useCurrentSession } from '@/stores/sessionStore'
 import { MessageList } from './MessageList'
 import { InputArea } from './InputArea'
+import { DeepSeekStartPage, ChatMode } from './DeepSeekStartPage'
+import { AsyncResearchProgress, ClarificationDialogAsync } from '@/components/research/AsyncResearchProgress'
+import { researchTaskService, ResearchTaskStatus as TaskStatus } from '@/services/researchTaskService'
 import { toast } from '@/components/ui'
 import { isThinkingModel, isMultimodalModel } from './ModelSelector'
 import type { Message, MessageContent } from '@/types'
@@ -15,7 +19,7 @@ interface ChatContainerProps {
 }
 
 export function ChatContainer({ className }: ChatContainerProps) {
-  // Use selector for messages
+  const router = useRouter()
   const messages = useMessages()
   const currentSession = useCurrentSession()
 
@@ -40,6 +44,11 @@ export function ChatContainer({ className }: ChatContainerProps) {
   // State for prefilling input from suggestions
   const [prefillInput, setPrefillInput] = React.useState('')
 
+  // Deep Research State
+  const [activeResearchTask, setActiveResearchTask] = React.useState<TaskStatus | null>(null)
+  const [researchLoading, setResearchLoading] = React.useState(false)
+  const [clarificationQuestions, setClarificationQuestions] = React.useState<string[] | null>(null)
+
   // Sync current session with chat store
   React.useEffect(() => {
     if (currentSessionId) {
@@ -47,28 +56,186 @@ export function ChatContainer({ className }: ChatContainerProps) {
     }
   }, [currentSessionId, setCurrentSession])
 
+  // Helper for safe localStorage access
+  const safeLocalStorage = {
+    getItem: (key: string): string | null => {
+      try {
+        return localStorage.getItem(key)
+      } catch {
+        return null
+      }
+    },
+    setItem: (key: string, value: string): void => {
+      try {
+        localStorage.setItem(key, value)
+      } catch {
+        // Ignore localStorage errors
+      }
+    },
+    removeItem: (key: string): void => {
+      try {
+        localStorage.removeItem(key)
+      } catch {
+        // Ignore localStorage errors
+      }
+    },
+  }
+
+  // Check for active research task from localStorage on mount
+  React.useEffect(() => {
+    const savedTaskId = safeLocalStorage.getItem('activeResearchTask')
+    if (savedTaskId) {
+      researchTaskService.getTaskStatus(savedTaskId).then((status) => {
+        if (status.status === 'running' || status.status === 'paused') {
+          setActiveResearchTask(status)
+          // Start polling if running
+          if (status.status === 'running') {
+            researchTaskService.startPolling(savedTaskId, (updatedStatus) => {
+              setActiveResearchTask(updatedStatus)
+            })
+          } else if (status.status === 'paused' && status.phase === 'clarify' && status.clarificationQuestions) {
+            setClarificationQuestions(status.clarificationQuestions)
+          }
+        } else {
+          // Task is completed/failed/cancelled, clear storage
+          safeLocalStorage.removeItem('activeResearchTask')
+        }
+      }).catch(() => {
+        safeLocalStorage.removeItem('activeResearchTask')
+      })
+    }
+  }, [])
+
   // Handle suggestion click from EmptyState
   const handleSuggestionClick = (text: string) => {
     console.log('[ChatContainer] handleSuggestionClick called with:', text)
     setPrefillInput(text)
   }
 
-  // Handle thinking mode change - only allow if current model supports it
+  // Handle thinking mode change
   const handleThinkingChange = (enable: boolean) => {
     if (enable && !isThinkingModel(selectedModel)) {
       toast.error('当前模型不支持深度思考，请切换到支持的模型')
       return
     }
     setEnableThinking(enable)
+  }
 
-    if (enable && useAgent) {
-      setUseAgent(false)
-      toast.info('深度思考模式下已关闭联网搜索')
+  // Handle deep research
+  const handleDeepResearch = async (query: string) => {
+    setResearchLoading(true)
+    try {
+      const result = await researchTaskService.createTask(query, {
+        skipClarification: false,
+      })
+
+      // Save task ID to localStorage
+      safeLocalStorage.setItem('activeResearchTask', result.taskId)
+
+      // Get initial status
+      const status = await researchTaskService.getTaskStatus(result.taskId)
+      setActiveResearchTask(status)
+
+      // Start polling
+      researchTaskService.startPolling(result.taskId, (updatedStatus) => {
+        setActiveResearchTask(updatedStatus)
+
+        // Check if paused for clarification - read questions from status
+        if (updatedStatus.status === 'paused' && updatedStatus.phase === 'clarify') {
+          if (updatedStatus.clarificationQuestions && updatedStatus.clarificationQuestions.length > 0) {
+            setClarificationQuestions(updatedStatus.clarificationQuestions)
+          }
+        }
+
+        // Clear localStorage when completed
+        if (['completed', 'failed', 'cancelled'].includes(updatedStatus.status)) {
+          safeLocalStorage.removeItem('activeResearchTask')
+        }
+      })
+
+      toast.success('深度研究任务已创建，正在后台执行...')
+    } catch (error: any) {
+      toast.error(error.message || '创建深度研究任务失败')
+    } finally {
+      setResearchLoading(false)
     }
   }
 
+  // Handle clarification submit
+  const handleClarificationSubmit = async (answers: string[]) => {
+    if (!activeResearchTask) return
+
+    try {
+      await researchTaskService.submitClarification(activeResearchTask.taskId, answers)
+      setClarificationQuestions(null)
+      toast.success('已提交澄清回复，任务继续执行')
+    } catch (error: any) {
+      toast.error(error.message || '提交澄清失败')
+    }
+  }
+
+  // Handle cancel research
+  const handleCancelResearch = async () => {
+    if (!activeResearchTask) return
+
+    try {
+      await researchTaskService.cancelTask(activeResearchTask.taskId)
+      setActiveResearchTask(null)
+      safeLocalStorage.removeItem('activeResearchTask')
+      toast.success('研究任务已取消')
+    } catch (error: any) {
+      toast.error(error.message || '取消任务失败')
+    }
+  }
+
+  // Handle view research result
+  const handleViewResearchResult = async () => {
+    if (!activeResearchTask) return
+
+    try {
+      const result = await researchTaskService.getTaskResult(activeResearchTask.taskId)
+      if (result.reportUrl) {
+        // Open report in new tab or download
+        window.open(result.reportUrl, '_blank')
+      }
+    } catch (error: any) {
+      toast.error(error.message || '获取报告失败')
+    }
+  }
+
+  // Handle send from start page
+  const handleStartPageSend = async (
+    content: string,
+    options?: {
+      mode?: ChatMode
+      enableDeepThinking?: boolean
+      enableSearch?: boolean
+      enableDeepResearch?: boolean
+    }
+  ) => {
+    // Handle deep research mode
+    if (options?.enableDeepResearch) {
+      await handleDeepResearch(content)
+      return
+    }
+
+    // Update settings based on options
+    if (options?.enableDeepThinking !== undefined) {
+      handleThinkingChange(options.enableDeepThinking)
+    }
+    if (options?.enableSearch !== undefined) {
+      setUseAgent(options.enableSearch)
+    }
+
+    // Regular chat
+    await handleSend(content)
+  }
+
   const handleSend = async (content: string | MessageContent) => {
-    console.log('[ChatContainer] handleSend called with content:', JSON.stringify(content))
+    console.log('[ChatContainer] handleSend called')
+
+    // Get sessionId directly from store (not hook value) to ensure latest state
+    let sessionId = useSessionStore.getState().currentSessionId
 
     // Convert string to MessageContent if needed
     let messageContent: MessageContent
@@ -106,21 +273,25 @@ export function ChatContainer({ className }: ChatContainerProps) {
     }
 
     try {
-      // Use currentSessionId directly, not currentSession object
-      let sessionId = currentSessionId
-
-      // Only create new session if we don't have one
       if (!sessionId) {
+        console.log('[ChatContainer] No sessionId, creating new session...')
         const session = await createSession()
         sessionId = session.id
-        // createSession already sets currentSessionId, no need to call selectSession
+        console.log('[ChatContainer] Created session:', sessionId)
+        // Update URL without triggering navigation
+        window.history.replaceState(null, '', `/chat/${sessionId}`)
       }
 
+      // Sync to chatStore before sending
+      setCurrentSession(sessionId)
+
+      console.log('[ChatContainer] Calling sendMessage with sessionId:', sessionId)
       await sendMessage({
         sessionId: sessionId,
         content: messageContent,
         enableThinking: enableThinking,
       })
+      console.log('[ChatContainer] sendMessage completed')
     } catch (error) {
       toast.error('发送消息失败，请重试')
       console.error('Send message error:', error)
@@ -161,36 +332,77 @@ export function ChatContainer({ className }: ChatContainerProps) {
     }
   }
 
-  return (
-    <div className={cn(className, 'min-h-0')}>
-      {/* Messages */}
-      <MessageList
-        messages={messages}
-        isLoading={isLoading}
-        onRegenerate={handleRegenerate}
-        onCopy={handleCopy}
-        onFeedback={handleFeedback}
-        onDelete={handleDelete}
-        onSuggestionClick={handleSuggestionClick}
-      />
+  // Show start page if no messages and no active research
+  const showStartPage = messages.length === 0 && !activeResearchTask
 
-      {/* Input Area */}
-      <InputArea
-        onSend={handleSend}
-        onStop={handleStop}
-        isLoading={isLoading}
-        disabled={false}
-        placeholder="输入消息..."
-        showSettings={false}
-        showModelSelector={true}
-        selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
-        useAgent={useAgent}
-        onAgentChange={setUseAgent}
-        enableThinking={enableThinking}
-        onThinkingChange={handleThinkingChange}
-        initialValue={prefillInput}
-      />
+  // Show research progress if active research
+  const showResearchProgress = activeResearchTask !== null
+
+  return (
+    <div className={cn(className, 'min-h-0 flex flex-col')}>
+      {/* Start Page */}
+      {showStartPage && (
+        <DeepSeekStartPage
+          onSend={handleStartPageSend}
+          isLoading={isLoading}
+          className="flex-1"
+        />
+      )}
+
+      {/* Research Progress */}
+      {showResearchProgress && (
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <AsyncResearchProgress
+            taskStatus={activeResearchTask!}
+            onCancel={handleCancelResearch}
+            onViewResult={handleViewResearchResult}
+            className="w-full max-w-[720px]"
+          />
+
+          {/* Clarification Dialog */}
+          {clarificationQuestions && (
+            <ClarificationDialogAsync
+              questions={clarificationQuestions}
+              onSubmit={handleClarificationSubmit}
+              className="w-full max-w-[720px] mt-4"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Regular Chat */}
+      {!showStartPage && !showResearchProgress && (
+        <>
+          {/* Messages */}
+          <MessageList
+            messages={messages}
+            isLoading={isLoading}
+            onRegenerate={handleRegenerate}
+            onCopy={handleCopy}
+            onFeedback={handleFeedback}
+            onDelete={handleDelete}
+            onSuggestionClick={handleSuggestionClick}
+          />
+
+          {/* Input Area */}
+          <InputArea
+            onSend={handleSend}
+            onStop={handleStop}
+            isLoading={isLoading}
+            disabled={false}
+            placeholder="输入消息..."
+            showSettings={false}
+            showModelSelector={true}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            useAgent={useAgent}
+            onAgentChange={setUseAgent}
+            enableThinking={enableThinking}
+            onThinkingChange={handleThinkingChange}
+            initialValue={prefillInput}
+          />
+        </>
+      )}
     </div>
   )
 }

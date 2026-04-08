@@ -177,7 +177,7 @@ export function ResearchProgress({
         )}
 
         {/* 子任务列表 */}
-        {subTasks && subTasks.length > 0 && currentPhase === 'search' && (
+        {subTasks && subTasks.length > 0 && currentPhase === 'search' && currentTaskIndex !== undefined && (
           <div className="mt-4 space-y-2">
             <p className="text-xs font-medium text-gray-500 dark:text-gray-400">研究子任务</p>
             {subTasks.map((task, index) => (
