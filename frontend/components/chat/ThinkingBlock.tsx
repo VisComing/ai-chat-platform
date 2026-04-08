@@ -1,6 +1,8 @@
 'use client'
 
 import * as React from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronRight, Brain, Lightbulb } from 'lucide-react'
 
@@ -72,8 +74,44 @@ export function ThinkingBlock({ content, isStreaming, isDeepThinking }: Thinking
       {/* Content - 平滑展开动画 */}
       {isExpanded && (
         <div className="mt-2 px-4 py-3 rounded-xl text-sm leading-relaxed animate-fade-in bg-[#3b82f6]/5 text-[#212121] dark:text-white">
-          <div className="whitespace-pre-wrap break-words">
-            {content}
+          <div className="break-words">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                strong: ({ children }) => <strong className="font-semibold text-[#3b82f6]">{children}</strong>,
+                em: ({ children }) => <em className="italic">{children}</em>,
+                code: ({ className, children, ...props }) => {
+                  if (className?.includes('language-')) {
+                    return (
+                      <code className={cn('px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10', className)} {...props}>
+                        {children}
+                      </code>
+                    )
+                  }
+                  return (
+                    <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-[#3b82f6]/10" {...props}>
+                      {children}
+                    </code>
+                  )
+                },
+                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                li: ({ children }) => <li className="ml-2">{children}</li>,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-[#3b82f6]/30 pl-3 my-2 text-[#64748b]">
+                    {children}
+                  </blockquote>
+                ),
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline">
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {content}
+            </ReactMarkdown>
             {isStreaming && (
               <span className="inline-block w-1.5 h-4 bg-[#3b82f6] animate-pulse ml-0.5 rounded-full" />
             )}
