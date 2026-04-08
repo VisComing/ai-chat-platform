@@ -8,7 +8,7 @@ from app.core.database import init_db, close_db, async_session_maker
 from app.core.logging import setup_logging, get_logger
 from app.core.security import get_password_hash
 from app.api.v1 import auth, sessions, chat, users, files, speech, research, research_async
-from app.models import User
+from app.models import User, ChatTask
 
 # Initialize logging
 setup_logging()
