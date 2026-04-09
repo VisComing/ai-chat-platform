@@ -51,27 +51,28 @@ async def create_research_task(
     """
     logger.info(f"[Research API] User {user_id} creating research task: {request.query[:50]}...")
 
-    # 1. 检查用户配额
-    quota = await get_or_create_quota(db, user_id)
-
-    # 重置每日配额（如果需要）
-    today = date.today()
-    if quota.last_reset_date.date() != today:
-        quota.daily_used = 0
-        quota.last_reset_date = datetime.utcnow()
-        await db.commit()
-
-    # 检查是否超过每日限制
-    if quota.daily_used >= quota.daily_limit:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "QUOTA_EXCEEDED",
-                "message": f"今日深度研究次数已达上限（{quota.daily_limit}次），请明天再试",
-                "daily_limit": quota.daily_limit,
-                "daily_used": quota.daily_used,
-            }
-        )
+    # 配额检查已禁用
+    # # 1. 检查用户配额
+    # quota = await get_or_create_quota(db, user_id)
+    #
+    # # 重置每日配额（如果需要）
+    # today = date.today()
+    # if quota.last_reset_date.date() != today:
+    #     quota.daily_used = 0
+    #     quota.last_reset_date = datetime.utcnow()
+    #     await db.commit()
+    #
+    # # 检查是否超过每日限制
+    # if quota.daily_used >= quota.daily_limit:
+    #     raise HTTPException(
+    #         status_code=429,
+    #         detail={
+    #             "code": "QUOTA_EXCEEDED",
+    #             "message": f"今日深度研究次数已达上限（{quota.daily_limit}次），请明天再试",
+    #             "daily_limit": quota.daily_limit,
+    #             "daily_used": quota.daily_used,
+    #         }
+    #     )
 
     # 2. 创建任务记录
     task = ResearchTask(
@@ -86,10 +87,10 @@ async def create_research_task(
     await db.commit()
     await db.refresh(task)
 
-    # 3. 增加配额使用次数
-    quota.daily_used += 1
-    quota.total_tasks += 1
-    await db.commit()
+    # 3. 增加配额使用次数 - 已禁用
+    # quota.daily_used += 1
+    # quota.total_tasks += 1
+    # await db.commit()
 
     # 4. 入队 Huey 任务
     execute_research(

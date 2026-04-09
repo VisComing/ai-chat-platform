@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { Zap, Diamond, Sparkles, Search, Send, Paperclip, Brain, Loader2 } from 'lucide-react'
+import { ModelSelector } from './ModelSelector'
 
 // ============= Types =============
 
@@ -17,28 +18,42 @@ interface DeepSeekStartPageProps {
   }) => void
   isLoading?: boolean
   className?: string
+  selectedModel?: string
+  onModelChange?: (modelId: string) => void
 }
 
-// ============= Whale Logo SVG =============
+// ============= Brand Logo SVG =============
 
-function WhaleLogo({ className }: { className?: string }) {
+function BrandLogo({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 40 40"
+      viewBox="0 0 48 48"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={cn('text-blue-500', className)}
+      className={className}
     >
+      {/* Outer glow */}
+      <defs>
+        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#2563eb" />
+        </linearGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      {/* Main circle with gradient */}
+      <circle cx="24" cy="24" r="20" fill="url(#logoGradient)" filter="url(#glow)" opacity="0.9" />
+      {/* Inner whale icon */}
       <path
-        d="M20 4C11.163 4 4 11.163 4 20s7.163 16 16 16 16-7.163 16-16S28.837 4 20 4z"
-        fill="currentColor"
-        opacity="0.1"
+        d="M32 20c-2.5-5-7.5-7.5-12.5-6.25-3.75 1.25-6.25 5-6.25 8.75 0 5 3.75 10 10 10 2.5 0 5-1.25 6.25-2.5l2.5 1.25c1.25 0 2.5-1.25 1.25-2.5l-1.25-3.75c1.25-1.25 1.25-3.75 0-5z"
+        fill="white"
       />
-      <path
-        d="M28 16c-2-4-6-6-10-5-3 1-5 4-5 7 0 4 3 8 8 8 2 0 4-1 5-2l2 1c1 0 2-1 1-2l-1-3c1-1 1-3 0-4z"
-        fill="currentColor"
-      />
-      <circle cx="16" cy="17" r="1.5" fill="white" />
+      <circle cx="21" cy="21.5" r="2" fill="#3b82f6" />
     </svg>
   )
 }
@@ -52,12 +67,12 @@ interface ModeSwitcherProps {
 
 function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
   return (
-    <div className="relative flex items-center bg-[#f5f5f5] dark:bg-white/5 rounded-full p-1 h-11 w-fit">
+    <div className="relative flex items-center bg-slate-100/80 dark:bg-slate-800/50 rounded-full p-1.5 h-12 w-fit backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/50">
       {/* Sliding Background */}
       <div
         className={cn(
-          'absolute h-9 bg-[#3b82f6] rounded-full transition-transform duration-300 ease-out',
-          mode === 'quick' ? 'w-[140px] translate-x-0' : 'w-[140px] translate-x-[140px]'
+          'absolute h-9 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300 ease-out shadow-lg shadow-blue-500/25',
+          mode === 'quick' ? 'w-[calc(50%-6px)] left-1.5' : 'w-[calc(50%-6px)] left-[calc(50%+3px)]'
         )}
       />
 
@@ -65,24 +80,28 @@ function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
       <button
         onClick={() => onChange('quick')}
         className={cn(
-          'relative z-10 flex items-center gap-1.5 px-5 h-9 rounded-full transition-colors duration-200',
-          mode === 'quick' ? 'text-white' : 'text-[#64748b] hover:text-[#212121] dark:hover:text-white'
+          'relative z-10 flex items-center gap-2 px-6 h-9 rounded-full transition-all duration-200',
+          mode === 'quick'
+            ? 'text-white'
+            : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
         )}
       >
-        <Zap className="w-4 h-4" />
-        <span className="text-sm font-medium">快速模式</span>
+        <Zap className={cn('w-4 h-4', mode === 'quick' && 'fill-current')} />
+        <span className="text-sm font-semibold">快速模式</span>
       </button>
 
       {/* Expert Mode Button */}
       <button
         onClick={() => onChange('expert')}
         className={cn(
-          'relative z-10 flex items-center gap-1.5 px-5 h-9 rounded-full transition-colors duration-200',
-          mode === 'expert' ? 'text-white' : 'text-[#64748b] hover:text-[#212121] dark:hover:text-white'
+          'relative z-10 flex items-center gap-2 px-6 h-9 rounded-full transition-all duration-200',
+          mode === 'expert'
+            ? 'text-white'
+            : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
         )}
       >
-        <Diamond className="w-4 h-4" />
-        <span className="text-sm font-medium">专家模式</span>
+        <Diamond className={cn('w-4 h-4', mode === 'expert' && 'fill-current')} />
+        <span className="text-sm font-semibold">专家模式</span>
       </button>
     </div>
   )
@@ -115,13 +134,13 @@ function FeatureButtons({
       <button
         onClick={() => onDeepThinkingChange(!enableDeepThinking)}
         className={cn(
-          'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+          'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200 border',
           enableDeepThinking
-            ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
-            : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+            ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-500/30'
+            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600'
         )}
       >
-        <Brain className="w-4 h-4" />
+        <Brain className={cn('w-4 h-4', enableDeepThinking && 'text-blue-500')} />
         <span className="hidden sm:inline">深度思考</span>
       </button>
 
@@ -129,28 +148,27 @@ function FeatureButtons({
       <button
         onClick={() => onSearchChange(!enableSearch)}
         className={cn(
-          'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
+          'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200 border',
           enableSearch
-            ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
-            : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+            ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-500/30'
+            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600'
         )}
       >
-        <Search className="w-4 h-4" />
+        <Search className={cn('w-4 h-4', enableSearch && 'text-blue-500')} />
         <span className="hidden sm:inline">联网搜索</span>
       </button>
 
-      {/* 深度研究（仅专家模式） */}
+      {/* 深度研究（仅专家模式，强制开启） */}
       {mode === 'expert' && (
         <button
-          onClick={() => onDeepResearchChange(!enableDeepResearch)}
+          disabled
           className={cn(
-            'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200',
-            enableDeepResearch
-              ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
-              : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
+            'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200 border',
+            'bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 text-purple-600 dark:from-purple-500/10 dark:to-indigo-500/10 dark:border-purple-500/30 cursor-default'
           )}
+          title="专家模式强制开启深度研究"
         >
-          <Sparkles className="w-4 h-4" />
+          <Sparkles className="w-4 h-4 text-purple-500" />
           <span className="hidden sm:inline">深度研究</span>
         </button>
       )}
@@ -164,6 +182,8 @@ export function DeepSeekStartPage({
   onSend,
   isLoading = false,
   className,
+  selectedModel,
+  onModelChange,
 }: DeepSeekStartPageProps) {
   const [mode, setMode] = React.useState<ChatMode>('quick')
   const [inputValue, setInputValue] = React.useState('')
@@ -183,14 +203,26 @@ export function DeepSeekStartPage({
     }
   }, [inputValue])
 
-  // Handle deep research toggle
-  const handleDeepResearchChange = (enable: boolean) => {
-    setEnableDeepResearch(enable)
-    if (enable) {
-      // 深度研究模式下关闭其他选项
+  // Handle mode change - expert mode forces deep research on
+  const handleModeChange = (newMode: ChatMode) => {
+    setMode(newMode)
+    if (newMode === 'expert') {
+      // 专家模式强制开启深度研究，关闭深度思考和联网搜索
+      setEnableDeepResearch(true)
       setEnableDeepThinking(false)
       setEnableSearch(false)
+    } else {
+      // 快速模式关闭深度研究
+      setEnableDeepResearch(false)
+      setEnableSearch(true)
     }
+  }
+  const handleDeepResearchChange = (enable: boolean) => {
+    // 专家模式下深度研究强制开启，不允许关闭
+    if (mode === 'expert') {
+      return
+    }
+    setEnableDeepResearch(enable)
   }
 
   // Handle send
@@ -218,33 +250,56 @@ export function DeepSeekStartPage({
   const hasContent = inputValue.trim().length > 0
 
   return (
-    <div className={cn('flex flex-col items-center justify-center min-h-full px-3 sm:px-4', className)}>
-      {/* Brand Section - 移动端减少顶部间距 */}
-      <div className="flex flex-col items-center mb-4 sm:mb-8" style={{ marginTop: '8vh' }}>
-        {/* Logo - 品牌蓝，移动端缩小 */}
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#3b82f6] flex items-center justify-center mb-3 sm:mb-4 shadow-lg shadow-[#3b82f6]/20">
-          <WhaleLogo className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+    <div className={cn('flex flex-col items-center justify-center min-h-full px-4 sm:px-6', className)}>
+      {/* Brand Section */}
+      <div className="flex flex-col items-center mb-6 sm:mb-8" style={{ marginTop: '6vh' }}>
+        {/* Logo with enhanced styling */}
+        <div className="relative mb-4">
+          {/* Glow effect */}
+          <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full scale-150" />
+          {/* Logo container */}
+          <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white dark:bg-slate-800 shadow-xl shadow-blue-500/20
+                          border border-slate-100 dark:border-slate-700 flex items-center justify-center">
+            <BrandLogo className="w-10 h-10 sm:w-12 sm:h-12" />
+          </div>
         </div>
-        <h1 className="text-lg sm:text-xl font-semibold text-[#212121] dark:text-white">
+
+        {/* Title with better typography */}
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-white tracking-tight">
           今天想聊点什么？
         </h1>
+        <p className="text-sm text-slate-400 dark:text-slate-500 mt-1.5">
+          AI 助手随时为您服务
+        </p>
       </div>
 
       {/* Mode Switcher */}
-      <div className="mb-4 sm:mb-6">
-        <ModeSwitcher mode={mode} onChange={setMode} />
+      <div className="mb-5 sm:mb-6">
+        <ModeSwitcher mode={mode} onChange={handleModeChange} />
       </div>
 
-      {/* Input Container */}
+      {/* Input Container - Enhanced styling */}
       <div
         className={cn(
-          'w-full max-w-[720px] bg-white dark:bg-[#1a1a2e] rounded-2xl sm:rounded-3xl transition-all duration-200',
-          'border border-[#e5e7eb] dark:border-white/[0.08]',
+          'w-full max-w-[720px] bg-white dark:bg-slate-800/80 rounded-3xl transition-all duration-300',
+          'border border-slate-200 dark:border-slate-700/50',
+          'shadow-lg shadow-slate-200/50 dark:shadow-slate-900/50',
           isFocused
-            ? 'border-[#3b82f6] ring-2 sm:ring-4 ring-[#3b82f6]/10'
-            : 'shadow-[0_4px_24px_rgba(0,0,0,0.08)]'
+            ? 'border-blue-400 dark:border-blue-500/50 ring-4 ring-blue-500/10 shadow-xl shadow-blue-500/10'
+            : 'hover:shadow-xl hover:shadow-slate-300/50 dark:hover:shadow-slate-900/50'
         )}
       >
+        {/* Top Bar: Model Selector */}
+        <div className="flex items-center justify-between px-4 sm:px-5 pt-3 pb-2 border-b border-slate-100 dark:border-slate-700/50">
+          <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">模型选择</span>
+          {selectedModel && onModelChange && (
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+            />
+          )}
+        </div>
+
         {/* Textarea */}
         <div className="p-4 sm:p-5 pb-2 sm:pb-3">
           <textarea
@@ -256,9 +311,9 @@ export function DeepSeekStartPage({
             onKeyDown={handleKeyDown}
             placeholder={mode === 'quick' ? '发送消息开始对话...' : '输入研究问题，开始深度分析...'}
             className={cn(
-              'w-full resize-none bg-transparent outline-none text-[#212121] dark:text-white',
+              'w-full resize-none bg-transparent outline-none text-slate-700 dark:text-slate-200',
               'min-h-[60px] sm:min-h-[80px] max-h-[200px] text-base leading-relaxed',
-              'placeholder:text-[#94a3b8]'
+              'placeholder:text-slate-400'
             )}
             rows={1}
           />
@@ -279,32 +334,32 @@ export function DeepSeekStartPage({
 
           {/* Right: Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Attachment Button - 移动端隐藏 */}
+            {/* Attachment Button */}
             <button
-              className="p-2 text-[#94a3b8] hover:text-[#64748b] transition-colors hidden sm:block"
+              className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-xl transition-all hidden sm:flex"
               title="添加附件"
             >
               <Paperclip className="w-5 h-5" />
             </button>
 
-            {/* Send Button */}
+            {/* Send Button - Enhanced */}
             <button
               onClick={handleSend}
               disabled={!hasContent || isLoading}
               className={cn(
-                'flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200',
+                'flex items-center justify-center w-11 h-11 rounded-xl transition-all duration-200',
                 hasContent && !isLoading
-                  ? 'bg-[#3b82f6] hover:bg-[#2563eb] hover:-translate-y-0.5 shadow-lg shadow-[#3b82f6]/25'
-                  : 'bg-[#e5e7eb] dark:bg-white/5 cursor-not-allowed'
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 hover:-translate-y-0.5 shadow-lg shadow-blue-500/30'
+                  : 'bg-slate-100 dark:bg-slate-700 cursor-not-allowed'
               )}
             >
               {isLoading ? (
-                <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-spin" />
+                <Loader2 className="w-5 h-5 text-white animate-spin" />
               ) : (
                 <Send
                   className={cn(
-                    'w-4 h-4 sm:w-5 sm:h-5 transition-colors',
-                    hasContent ? 'text-white' : 'text-[#94a3b8]'
+                    'w-5 h-5 transition-transform',
+                    hasContent ? 'text-white' : 'text-slate-400'
                   )}
                 />
               )}
@@ -315,42 +370,11 @@ export function DeepSeekStartPage({
 
       {/* Tips for Expert Mode */}
       {mode === 'expert' && enableDeepResearch && (
-        <div className="mt-3 sm:mt-4 text-sm text-[#94a3b8] text-center max-w-[720px] px-3">
+        <div className="mt-4 text-sm text-slate-500 dark:text-slate-400 text-center max-w-[720px] px-4">
           <p className="flex items-center justify-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#3b82f6]" />
-            深度研究将在后台异步执行，您可以关闭页面稍后查看结果
+            <Sparkles className="w-4 h-4 text-purple-500" />
+            <span>深度研究将在后台异步执行，您可以关闭页面稍后查看结果</span>
           </p>
-        </div>
-      )}
-
-      {/* Quick Suggestions - 能力卡片网格 */}
-      {mode === 'quick' && !hasContent && (
-        <div className="mt-4 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 max-w-[720px] w-full px-1 sm:px-0">
-          {[
-            { icon: '💡', text: '帮我解释量子计算', desc: '科学知识解答' },
-            { icon: '📝', text: '写一封商务邮件', desc: '写作助手' },
-            { icon: '🔧', text: '帮我调试代码', desc: '编程助手' },
-            { icon: '📊', text: '分析数据趋势', desc: '数据分析' },
-          ].map((suggestion, i) => (
-            <button
-              key={i}
-              onClick={() => setInputValue(suggestion.text)}
-              className="group flex items-center gap-2 sm:gap-3 p-3 sm:p-4 text-left rounded-xl sm:rounded-2xl
-                         bg-white dark:bg-[#1a1a2e] border border-[#e5e7eb] dark:border-white/[0.08]
-                         hover:border-[#3b82f6]/30 hover:shadow-md hover:-translate-y-0.5
-                         transition-all duration-200"
-            >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#f5f5f5] dark:bg-white/5 flex items-center justify-center text-base sm:text-lg shrink-0">
-                {suggestion.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[#212121] dark:text-white truncate">
-                  {suggestion.text}
-                </p>
-                <p className="text-xs text-[#94a3b8] hidden sm:block">{suggestion.desc}</p>
-              </div>
-            </button>
-          ))}
         </div>
       )}
     </div>

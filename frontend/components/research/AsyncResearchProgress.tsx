@@ -263,9 +263,11 @@ export function AsyncResearchProgress({
           </span>
         )}
         <div className="flex-1" />
-        <span className="text-xs text-gray-400">
-          任务 ID: {taskStatus.taskId.slice(0, 8)}...
-        </span>
+        {taskStatus.taskId && (
+          <span className="text-xs text-gray-400">
+            任务 ID: {taskStatus.taskId.slice(0, 8)}...
+          </span>
+        )}
       </div>
     </div>
   )
