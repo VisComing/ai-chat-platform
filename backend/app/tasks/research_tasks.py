@@ -14,7 +14,7 @@ from app.core.huey_app import huey
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.models.research import ResearchTask, ResearchTaskStatus, ResearchPhase, ResearchClarification
-from app.services.deep_research_service import deep_research_service
+from app.services.deer_flow_service import deer_flow_service
 
 logger = logging.getLogger(__name__)
 
@@ -255,8 +255,8 @@ async def run_research_workflow(
     sub_tasks = []
 
     try:
-        # 执行研究流（使用现有的 deep_research_service）
-        async for event in deep_research_service.research(
+        # 执行研究流（使用 DeerFlow 服务）
+        async for event in deer_flow_service.research(
             query=query,
             model=model,
             skip_clarification=skip_clarification,
