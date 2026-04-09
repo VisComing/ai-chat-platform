@@ -19,8 +19,11 @@ import {
   Moon,
   Sun,
   User,
+  Sparkles,
+  Loader2,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { researchTaskService, ResearchTaskListItem } from '@/services/researchTaskService'
 
 interface SidebarProps {
   isOpen: boolean
@@ -139,8 +142,12 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
     isLoading,
   } = useSessionStore()
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'favorites' | 'archive'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'favorites' | 'archive' | 'research'>('chat')
   const [searchQuery, setSearchQuery] = useState('')
+
+  // 深度研究任务列表状态
+  const [researchTasks, setResearchTasks] = useState<ResearchTaskListItem[]>([])
+  const [researchLoading, setResearchLoading] = useState(false)
 
   // Filter sessions based on active tab and search
   const filteredSessions = sessions.filter((session) => {
@@ -161,6 +168,50 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
   })
 
   const sessionGroups = groupSessions(sortedSessions)
+
+  // 加载深度研究任务列表
+  useEffect(() => {
+    if (activeTab === 'research') {
+      loadResearchTasks()
+    }
+  }, [activeTab])
+
+  const loadResearchTasks = async () => {
+    setResearchLoading(true)
+    try {
+      const tasks = await researchTaskService.listTasks({ limit: 50 })
+      setResearchTasks(tasks)
+    } catch (error) {
+      console.error('加载研究任务失败:', error)
+    } finally {
+      setResearchLoading(false)
+    }
+  }
+
+  // 获取研究任务状态颜色
+  const getResearchStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'text-green-500'
+      case 'running': return 'text-blue-500'
+      case 'paused': return 'text-amber-500'
+      case 'failed': return 'text-red-500'
+      case 'cancelled': return 'text-gray-500'
+      default: return 'text-gray-400'
+    }
+  }
+
+  // 获取研究任务状态文本
+  const getResearchStatusText = (status: string) => {
+    switch (status) {
+      case 'completed': return '已完成'
+      case 'running': return '进行中'
+      case 'paused': return '等待澄清'
+      case 'pending': return '排队中'
+      case 'failed': return '失败'
+      case 'cancelled': return '已取消'
+      default: return status
+    }
+  }
 
   return (
     <>
@@ -253,6 +304,7 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
             { id: 'chat', label: '对话' },
             { id: 'favorites', label: '收藏' },
             { id: 'archive', label: '归档' },
+            { id: 'research', label: '研究' },
           ].map(({ id, label }) => (
             <button
               key={id}
@@ -270,9 +322,50 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
           ))}
         </div>
 
-        {/* Session List with Group Headers */}
+        {/* Session List / Research List */}
         <div className="flex-1 overflow-y-auto px-2">
-          {isLoading ? (
+          {activeTab === 'research' ? (
+            // 深度研究任务列表
+            researchLoading ? (
+              <div className="p-4 text-center text-[#64748b] text-sm">
+                <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
+                加载中...
+              </div>
+            ) : researchTasks.length === 0 ? (
+              <div className="p-4 text-center text-[#64748b] text-sm">
+                暂无深度研究任务
+              </div>
+            ) : (
+              researchTasks.map((task) => (
+                <div
+                  key={task.taskId}
+                  className="group relative h-16 hover:bg-white/[0.03] rounded-lg mx-1 transition-all duration-200"
+                >
+                  <button
+                    onClick={() => {
+                      // 跳转到任务详情或打开研究进度
+                      window.location.href = `/research/${task.taskId}`
+                    }}
+                    className="w-full h-full flex items-center gap-3 px-4 text-left"
+                  >
+                    <Sparkles className={cn('w-4 h-4 shrink-0', getResearchStatusColor(task.status))} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">
+                        {task.query}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-[#64748b]">
+                        <span className={getResearchStatusColor(task.status)}>
+                          {getResearchStatusText(task.status)}
+                        </span>
+                        <span>·</span>
+                        <span>{formatSmartTime(task.createdAt)}</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              ))
+            )
+          ) : isLoading ? (
             <>
               <SessionItemSkeleton />
               <SessionItemSkeleton />
