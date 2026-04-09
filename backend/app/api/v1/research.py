@@ -1,5 +1,7 @@
 """
 Deep Research API Endpoint
+
+支持 DeerFlow 架构的深度研究 API
 """
 import json
 import logging
@@ -11,7 +13,7 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.security import get_current_user_id
-from app.services.deep_research_service import deep_research_service
+from app.services.deer_flow_service import deer_flow_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -24,6 +26,7 @@ class ResearchRequest(BaseModel):
     sessionId: Optional[str] = None  # 会话ID（可选）
     skipClarification: bool = False  # 是否跳过澄清
     clarifiedRequirements: Optional[str] = None  # 已澄清的需求
+    executionMode: Optional[str] = "parallel"  # 执行模式: parallel/sequential/mixed/ultra
 
 
 class ClarifyRequest(BaseModel):
@@ -41,10 +44,10 @@ async def research_stream(
     """
     深度研究 SSE 流式接口
 
-    执行完整的四阶段研究工作流：
+    执行完整的四阶段研究工作流（DeerFlow 架构）：
     - 范围澄清（可选）
     - 研究规划
-    - 迭代搜索
+    - 并行子 Agent 执行
     - 综合报告
 
     SSE Events:
@@ -52,20 +55,21 @@ async def research_stream(
     - research_phase: 阶段状态更新
     - clarification_request: 需要用户澄清（可选）
     - research_plan: 研究计划
-    - search_progress: 搜索进度
-    - search_complete: 搜索完成
-    - evaluation_result: 评估结果
+    - sub_agent_started: 子 Agent 开始（新增）
+    - sub_agent_completed: 子 Agent 完成（新增）
     - research_complete: 研究完成，包含报告
     - error: 错误
     """
-    logger.info(f"[Deep Research] User {user_id} starting research: {request.query[:50]}...")
+    logger.info(f"[DeerFlow] User {user_id} starting research: {request.query[:50]}...")
+    logger.info(f"[DeerFlow] Execution mode: {request.executionMode}")
 
     async def event_generator():
-        async for event in deep_research_service.research(
+        async for event in deer_flow_service.research(
             query=request.query,
             model=request.model,
             skip_clarification=request.skipClarification,
             clarified_requirements=request.clarifiedRequirements,
+            execution_mode=request.executionMode or "parallel",
         ):
             # SSE 格式
             yield {
@@ -89,10 +93,10 @@ async def research_clarify(
     SSE Events:
     - 继续后续的研究流程事件
     """
-    logger.info(f"[Deep Research] User {user_id} submitted clarification: {len(request.answers)} answers")
+    logger.info(f"[DeerFlow] User {user_id} submitted clarification: {len(request.answers)} answers")
 
     async def event_generator():
-        async for event in deep_research_service.clarify(
+        async for event in deer_flow_service.clarify(
             query=request.query,
             clarified_answers=request.answers,
             model=request.model,
@@ -112,6 +116,9 @@ async def get_research_status():
         "success": True,
         "data": {
             "enabled": True,
+            "architecture": "DeerFlow",
+            "defaultExecutionMode": "parallel",
+            "supportedModes": ["parallel", "sequential", "mixed", "ultra"],
             "maxIterations": 5,
             "targetScore": 0.8,
             "supportedModels": [
