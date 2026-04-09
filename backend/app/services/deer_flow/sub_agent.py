@@ -13,6 +13,7 @@ from app.services.deer_flow.state import (
     SubTaskConfig,
     AgentResult,
     SubTaskStatus,
+    SearchStrategy,
 )
 from app.services.search_service import search_service
 from app.services.deep_research_graph import create_llm, parse_llm_json_response
@@ -210,15 +211,15 @@ class SubAgent:
 
     async def _execute_search(self, query: str) -> List[Dict[str, Any]]:
         """执行搜索"""
-        strategy = self.config.get("search_strategy", "广度扫描")
+        strategy = self.config.get("search_strategy", SearchStrategy.BREADTH.value)
 
-        if strategy == "广度扫描":
+        if strategy == SearchStrategy.BREADTH.value:
             top_k = 10
             time_range = search_service.TIME_NO_LIMIT
-        elif strategy == "深度挖掘":
+        elif strategy == SearchStrategy.DEPTH.value:
             top_k = 5
             time_range = search_service.TIME_ONE_YEAR
-        else:  # 边缘探索
+        else:  # EDGE
             top_k = 7
             time_range = search_service.TIME_NO_LIMIT
 

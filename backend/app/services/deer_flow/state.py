@@ -34,6 +34,13 @@ class SubTaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class SearchStrategy(str, Enum):
+    """搜索策略"""
+    BREADTH = "广度扫描"      # 广度扫描 - 多结果，无时间限制
+    DEPTH = "深度挖掘"        # 深度挖掘 - 少结果，一年内
+    EDGE = "边缘探索"         # 边缘探索 - 中等结果，无时间限制
+
+
 class SubTaskConfig(TypedDict, total=False):
     """子任务配置"""
     id: str                     # 子任务 ID

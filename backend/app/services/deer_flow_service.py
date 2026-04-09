@@ -68,17 +68,9 @@ class DeerFlowService:
             }
         }
 
-        # 进度回调函数
-        async def progress_callback(event_type: str, data: Dict[str, Any]):
-            pass  # 在下方处理
-
-        # 创建 Orchestrator
-        orchestrator = AgentOrchestrator()
-
         try:
             # 包装 Orchestrator 的执行过程，生成 SSE 事件
             async for event in self._run_with_events(
-                orchestrator,
                 task_id,
                 query,
                 model,
@@ -101,7 +93,6 @@ class DeerFlowService:
 
     async def _run_with_events(
         self,
-        orchestrator: AgentOrchestrator,
         task_id: str,
         query: str,
         model: str,
@@ -123,7 +114,7 @@ class DeerFlowService:
         async def collect_events(event_type: str, data: Dict[str, Any]):
             events_collector.append({"event": event_type, "data": data})
 
-        # 重新创建 Orchestrator 带回调
+        # 创建 Orchestrator 并执行研究
         orchestrator = AgentOrchestrator(progress_callback=collect_events)
 
         # 执行研究

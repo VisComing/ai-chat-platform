@@ -4,8 +4,10 @@ DeerFlow Orchestrator - 主 Agent 调度器
 负责任务调度和结果汇总，支持并行/顺序执行模式
 """
 import asyncio
+import json
 import logging
 import time
+import uuid
 from typing import Dict, Any, List, Optional, Callable
 
 from app.services.deer_flow.state import (
@@ -218,7 +220,6 @@ class AgentOrchestrator:
 
         # 添加 ID 和默认值到子任务
         sub_tasks = result.get("sub_tasks", [])
-        import uuid
         for i, task in enumerate(sub_tasks):
             task["id"] = str(uuid.uuid4())
             task["max_iterations"] = settings.deep_research_max_iterations
@@ -325,7 +326,6 @@ class AgentOrchestrator:
         llm = create_llm(state["model"])
 
         # 准备信息文本
-        import json
         info_sections = []
         for task in state.get("sub_tasks", []):
             task_topic = task.get("topic", "")

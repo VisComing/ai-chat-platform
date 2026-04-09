@@ -7,7 +7,7 @@ DeerFlow - SuperAgent Harness for Deep Research
 - 并行执行子任务
 """
 
-from .state import DeerFlowState, SubTaskConfig, AgentResult
+from .state import DeerFlowState, SubTaskConfig, AgentResult, SearchStrategy
 from .sub_agent import SubAgent
 from .orchestrator import AgentOrchestrator
 from .middleware_chain import MiddlewareChain
@@ -16,6 +16,7 @@ __all__ = [
     "DeerFlowState",
     "SubTaskConfig",
     "AgentResult",
+    "SearchStrategy",
     "SubAgent",
     "AgentOrchestrator",
     "MiddlewareChain",
