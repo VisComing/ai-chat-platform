@@ -15,7 +15,6 @@ type VoiceStatus = 'idle' | 'recording' | 'processing'
 export function VoiceInput({ onResult, onError, disabled }: VoiceInputProps) {
   const [status, setStatus] = React.useState<VoiceStatus>('idle')
   const [volume, setVolume] = React.useState(0)
-  const [interimText, setInterimText] = React.useState('')
 
   // WebSocket and Audio refs
   const wsRef = React.useRef<WebSocket | null>(null)
@@ -112,13 +111,7 @@ export function VoiceInput({ onResult, onError, disabled }: VoiceInputProps) {
         if (data.type === 'connected') {
           console.log('[VoiceInput] ASR connected')
         } else if (data.type === 'result') {
-          setInterimText(data.text)
           onResult(data.text, data.is_final)
-
-          if (data.is_final) {
-            // Final result, clear interim text
-            setInterimText('')
-          }
         } else if (data.type === 'error') {
           console.error('[VoiceInput] ASR error:', data.message)
           onError?.(data.message)
@@ -186,7 +179,6 @@ export function VoiceInput({ onResult, onError, disabled }: VoiceInputProps) {
     }
 
     setVolume(0)
-    setInterimText('')
 
     // Reset status to idle after a short delay
     // This allows the 'processing' state to be visible briefly
@@ -214,64 +206,45 @@ export function VoiceInput({ onResult, onError, disabled }: VoiceInputProps) {
 
   return (
     <div className="flex items-center gap-2">
-      {/* Mic button */}
+      {/* Mic button - match InputArea button style */}
       <button
         onClick={handleClick}
         disabled={disabled}
         className={cn(
-          'relative p-2 rounded-lg transition-all duration-200',
-          'flex items-center justify-center',
+          'flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-3 rounded-full text-sm font-medium transition-all duration-200',
           disabled && 'opacity-50 cursor-not-allowed',
-          status === 'idle' && 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100',
-          status === 'recording' && 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse',
-          status === 'processing' && 'text-secondary-500 bg-secondary-100',
+          status === 'idle' && 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10',
+          status === 'recording' && 'bg-red-500/10 text-red-500',
+          status === 'processing' && 'bg-[#f5f5f5] dark:bg-white/5 text-[#94a3b8]',
         )}
-        title={status === 'idle' ? '开始语音输入' : status === 'recording' ? '停止录音' : '处理中'}
+        title={status === 'idle' ? '语音输入' : status === 'recording' ? '停止录音' : '识别中'}
         type="button"
       >
         {status === 'idle' ? (
-          <Mic className="w-5 h-5" />
+          <Mic className="w-4 h-4" />
         ) : status === 'recording' ? (
-          <MicOff className="w-5 h-5" />
+          <>
+            <MicOff className="w-4 h-4" />
+            <span className="hidden sm:inline text-xs">停止</span>
+          </>
         ) : (
-          <Loader2 className="w-5 h-5 animate-spin" />
-        )}
-
-        {/* Volume ring visualization */}
-        {status === 'recording' && volume > 0 && (
-          <div
-            className="absolute inset-0 rounded-lg border-2 border-red-400 opacity-50"
-            style={{
-              transform: `scale(${1 + volume / 200})`,
-              transition: 'transform 0.1s ease-out',
-            }}
-          />
+          <Loader2 className="w-4 h-4 animate-spin" />
         )}
       </button>
 
       {/* Volume bars visualization */}
       {status === 'recording' && (
-        <div className="flex items-center gap-1 h-6">
-          {[...Array(5)].map((_, i) => (
+        <div className="flex items-center gap-0.5 h-4">
+          {[...Array(4)].map((_, i) => (
             <div
               key={i}
-              className={cn(
-                'w-1 bg-red-500 rounded-full transition-all duration-100',
-                'opacity-70',
-              )}
+              className="w-0.5 bg-red-500 rounded-full transition-all duration-100"
               style={{
-                height: `${Math.max(4, Math.min(24, volume * (0.5 + i * 0.1)))}px`,
+                height: `${Math.max(2, Math.min(16, volume * (0.3 + i * 0.15)))}px`,
               }}
             />
           ))}
         </div>
-      )}
-
-      {/* Interim text display */}
-      {interimText && (
-        <span className="text-sm text-secondary-400 italic max-w-[200px] truncate">
-          {interimText}
-        </span>
       )}
     </div>
   )

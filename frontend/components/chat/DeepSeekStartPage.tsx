@@ -1,9 +1,10 @@
 'use client'
 
 import * as React from 'react'
-import { cn } from '@/lib/utils'
-import { Zap, Diamond, Sparkles, Search, Send, Paperclip, Brain, Loader2 } from 'lucide-react'
-import { ModelSelector } from './ModelSelector'
+  import { cn } from '@/lib/utils'
+  import { Zap, Diamond, Sparkles, Search, Send, Paperclip, Brain, Loader2 } from 'lucide-react'
+  import { ModelSelector } from './ModelSelector'
+  import { VoiceInput } from './VoiceInput'
 
 // ============= Types =============
 
@@ -187,6 +188,7 @@ export function DeepSeekStartPage({
 }: DeepSeekStartPageProps) {
   const [mode, setMode] = React.useState<ChatMode>('quick')
   const [inputValue, setInputValue] = React.useState('')
+  const [voiceText, setVoiceText] = React.useState('')
   const [enableDeepThinking, setEnableDeepThinking] = React.useState(false)
   const [enableSearch, setEnableSearch] = React.useState(true)
   const [enableDeepResearch, setEnableDeepResearch] = React.useState(false)
@@ -224,6 +226,20 @@ export function DeepSeekStartPage({
     }
     setEnableDeepResearch(enable)
   }
+
+  // Handle voice input result
+  const handleVoiceResult = React.useCallback((text: string, isFinal: boolean) => {
+    if (isFinal) {
+      // Append final text to input
+      setInputValue(prev => prev + text)
+      setVoiceText('')
+      // Focus textarea after voice input
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    } else {
+      // Show interim text
+      setVoiceText(text)
+    }
+  }, [])
 
   // Handle send
   const handleSend = () => {
@@ -321,16 +337,30 @@ export function DeepSeekStartPage({
 
         {/* Bottom Bar */}
         <div className="flex items-center justify-between px-4 sm:px-5 pb-4 sm:pb-5">
-          {/* Left: Feature Buttons */}
-          <FeatureButtons
-            mode={mode}
-            enableDeepThinking={enableDeepThinking}
-            enableSearch={enableSearch}
-            enableDeepResearch={enableDeepResearch}
-            onDeepThinkingChange={setEnableDeepThinking}
-            onSearchChange={setEnableSearch}
-            onDeepResearchChange={handleDeepResearchChange}
-          />
+          {/* Left: Feature Buttons + Voice Input */}
+          <div className="flex items-center gap-2">
+            <FeatureButtons
+              mode={mode}
+              enableDeepThinking={enableDeepThinking}
+              enableSearch={enableSearch}
+              enableDeepResearch={enableDeepResearch}
+              onDeepThinkingChange={setEnableDeepThinking}
+              onSearchChange={setEnableSearch}
+              onDeepResearchChange={handleDeepResearchChange}
+            />
+            {/* Voice Input */}
+            <VoiceInput
+              onResult={handleVoiceResult}
+              onError={(err) => console.error('[DeepSeekStartPage] Voice error:', err)}
+              disabled={isLoading}
+            />
+            {/* Voice interim text display */}
+            {voiceText && (
+              <span className="text-sm text-slate-400 italic max-w-[150px] truncate">
+                {voiceText}
+              </span>
+            )}
+          </div>
 
           {/* Right: Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3">

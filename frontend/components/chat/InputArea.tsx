@@ -63,6 +63,7 @@ export function InputArea({
   const [input, setInput] = React.useState(initialValue || '')
   const [images, setImages] = React.useState<ImageAttachment[]>([])
   const [isDragging, setIsDragging] = React.useState(false)
+  const [voiceText, setVoiceText] = React.useState('')
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -280,6 +281,20 @@ export function InputArea({
     }
   }
 
+  // Handle voice input result
+  const handleVoiceResult = React.useCallback((text: string, isFinal: boolean) => {
+    if (isFinal) {
+      // Append final text to input
+      setInput(prev => prev + text)
+      setVoiceText('')
+      // Focus textarea after voice input
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    } else {
+      // Show interim text
+      setVoiceText(text)
+    }
+  }, [])
+
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -428,6 +443,18 @@ export function InputArea({
               >
                 <Image className="w-4 h-4" />
               </button>
+              {/* Voice Input */}
+              <VoiceInput
+                onResult={handleVoiceResult}
+                onError={(err) => console.error('[InputArea] Voice error:', err)}
+                disabled={disabled || isLoading}
+              />
+              {/* Voice interim text display */}
+              {voiceText && (
+                <span className="text-sm text-[#94a3b8] italic max-w-[150px] truncate">
+                  {voiceText}
+                </span>
+              )}
               {/* Hidden file input */}
               <input
                 ref={fileInputRef}
