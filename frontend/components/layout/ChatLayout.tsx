@@ -31,7 +31,7 @@ export function ChatLayout() {
   const currentSession = useCurrentSession()
   const { createSession, selectSession, sessions, init: initSessions } = useSessionStore()
   const { isAuthenticated } = useAuthStore()
-  const { setOnSessionCreated, setActiveResearchTaskId } = useChatStore()
+  const setOnSessionCreated = useChatStore.getState().setOnSessionCreated
 
   // Track if this is the first load (to read from URL)
   const isInitialLoad = useRef(true)
@@ -174,13 +174,6 @@ export function ChatLayout() {
     return null
   }
 
-  // Handle research task selection
-  const handleSelectResearchTask = (taskId: string) => {
-    // 清空当前会话，设置研究任务 ID
-    selectSession(null)
-    setActiveResearchTaskId(taskId)
-  }
-
   return (
     <div className="h-screen flex bg-white dark:bg-secondary-900">
       {/* Sidebar */}
@@ -190,7 +183,6 @@ export function ChatLayout() {
         onNewChat={handleNewChat}
         onSelectSession={handleSelectSession}
         onDeleteCurrentSession={handleDeleteCurrentSession}
-        onSelectResearchTask={handleSelectResearchTask}
       />
 
       {/* Main Content */}

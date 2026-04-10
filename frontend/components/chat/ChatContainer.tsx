@@ -8,8 +8,7 @@ import { useSessionStore, useCurrentSession } from '@/stores/sessionStore'
 import { MessageList } from './MessageList'
 import { InputArea } from './InputArea'
 import { DeepSeekStartPage, ChatMode } from './DeepSeekStartPage'
-import { AsyncResearchProgress, ClarificationDialogAsync } from '@/components/research/AsyncResearchProgress'
-import { researchTaskService, ResearchTaskStatus as TaskStatus } from '@/services/researchTaskService'
+import { researchTaskService } from '@/services/researchTaskService'
 import { toast } from '@/components/ui'
 import { isThinkingModel, isMultimodalModel } from './ModelSelector'
 import type { Message, MessageContent } from '@/types'
@@ -37,7 +36,6 @@ export function ChatContainer({ className }: ChatContainerProps) {
     setUseAgent,
     enableThinking,
     setEnableThinking,
-    activeResearchTaskId,
   } = useChatStore()
 
   const { createSession, selectSession, currentSessionId } = useSessionStore()
@@ -48,10 +46,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
   // State for initialization
   const [isInitializing, setIsInitializing] = React.useState(false)
 
-  // Deep Research State
-  const [activeResearchTask, setActiveResearchTask] = React.useState<TaskStatus | null>(null)
+  // Deep Research State (only for creating task, then navigate to detail page)
   const [researchLoading, setResearchLoading] = React.useState(false)
-  const [clarificationQuestions, setClarificationQuestions] = React.useState<string[] | null>(null)
 
   // Sync current session with chat store
   React.useEffect(() => {
@@ -86,63 +82,6 @@ export function ChatContainer({ className }: ChatContainerProps) {
     resumeIfNeeded()
   }, [currentSessionId, isInitializing])
 
-  // Helper for safe localStorage access
-  const safeLocalStorage = {
-    getItem: (key: string): string | null => {
-      try {
-        return localStorage.getItem(key)
-      } catch {
-        return null
-      }
-    },
-    setItem: (key: string, value: string): void => {
-      try {
-        localStorage.setItem(key, value)
-      } catch {
-        // Ignore localStorage errors
-      }
-    },
-    removeItem: (key: string): void => {
-      try {
-        localStorage.removeItem(key)
-      } catch {
-        // Ignore localStorage errors
-      }
-    },
-  }
-
-  // Check for active research task from store or localStorage on mount/change
-  React.useEffect(() => {
-    // 优先使用 store 中的 taskId（来自侧边栏点击）
-    const taskIdToLoad = activeResearchTaskId || safeLocalStorage.getItem('activeResearchTask')
-
-    if (taskIdToLoad) {
-      researchTaskService.getTaskStatus(taskIdToLoad).then((status) => {
-        // Show progress for pending, running, or paused tasks
-        if (['pending', 'running', 'paused'].includes(status.status)) {
-          setActiveResearchTask(status)
-          // Start polling if running or pending
-          if (status.status === 'running' || status.status === 'pending') {
-            researchTaskService.startPolling(taskIdToLoad, (updatedStatus) => {
-              setActiveResearchTask(updatedStatus)
-              // Handle clarification pause
-              if (updatedStatus.status === 'paused' && updatedStatus.phase === 'clarify' && updatedStatus.clarificationQuestions) {
-                setClarificationQuestions(updatedStatus.clarificationQuestions)
-              }
-            })
-          } else if (status.status === 'paused' && status.phase === 'clarify' && status.clarificationQuestions) {
-            setClarificationQuestions(status.clarificationQuestions)
-          }
-        } else {
-          // Task is completed/failed/cancelled, clear
-          safeLocalStorage.removeItem('activeResearchTask')
-        }
-      }).catch(() => {
-        safeLocalStorage.removeItem('activeResearchTask')
-      })
-    }
-  }, [activeResearchTaskId])
-
   // Handle suggestion click from EmptyState
   const handleSuggestionClick = (text: string) => {
     console.log('[ChatContainer] handleSuggestionClick called with:', text)
@@ -158,7 +97,7 @@ export function ChatContainer({ className }: ChatContainerProps) {
     setEnableThinking(enable)
   }
 
-  // Handle deep research
+  // Handle deep research - navigate to research page
   const handleDeepResearch = async (query: string) => {
     setResearchLoading(true)
     try {
@@ -166,77 +105,14 @@ export function ChatContainer({ className }: ChatContainerProps) {
         skipClarification: false,
       })
 
-      // Save task ID to localStorage
-      safeLocalStorage.setItem('activeResearchTask', result.taskId)
+      // Navigate to research detail page
+      router.push(`/research/${result.taskId}`)
+      toast.success('深度研究任务已创建')
 
-      // Get initial status
-      const status = await researchTaskService.getTaskStatus(result.taskId)
-      setActiveResearchTask(status)
-
-      // Start polling
-      researchTaskService.startPolling(result.taskId, (updatedStatus) => {
-        setActiveResearchTask(updatedStatus)
-
-        // Check if paused for clarification - read questions from status
-        if (updatedStatus.status === 'paused' && updatedStatus.phase === 'clarify') {
-          if (updatedStatus.clarificationQuestions && updatedStatus.clarificationQuestions.length > 0) {
-            setClarificationQuestions(updatedStatus.clarificationQuestions)
-          }
-        }
-
-        // Clear localStorage when completed
-        if (['completed', 'failed', 'cancelled'].includes(updatedStatus.status)) {
-          safeLocalStorage.removeItem('activeResearchTask')
-        }
-      })
-
-      toast.success('深度研究任务已创建，正在后台执行...')
     } catch (error: any) {
       toast.error(error.message || '创建深度研究任务失败')
     } finally {
       setResearchLoading(false)
-    }
-  }
-
-  // Handle clarification submit
-  const handleClarificationSubmit = async (answers: string[]) => {
-    if (!activeResearchTask) return
-
-    try {
-      await researchTaskService.submitClarification(activeResearchTask.taskId, answers)
-      setClarificationQuestions(null)
-      toast.success('已提交澄清回复，任务继续执行')
-    } catch (error: any) {
-      toast.error(error.message || '提交澄清失败')
-    }
-  }
-
-  // Handle cancel research
-  const handleCancelResearch = async () => {
-    if (!activeResearchTask) return
-
-    try {
-      await researchTaskService.cancelTask(activeResearchTask.taskId)
-      setActiveResearchTask(null)
-      safeLocalStorage.removeItem('activeResearchTask')
-      toast.success('研究任务已取消')
-    } catch (error: any) {
-      toast.error(error.message || '取消任务失败')
-    }
-  }
-
-  // Handle view research result
-  const handleViewResearchResult = async () => {
-    if (!activeResearchTask) return
-
-    try {
-      const result = await researchTaskService.getTaskResult(activeResearchTask.taskId)
-      if (result.reportUrl) {
-        // Open report in new tab or download
-        window.open(result.reportUrl, '_blank')
-      }
-    } catch (error: any) {
-      toast.error(error.message || '获取报告失败')
     }
   }
 
@@ -369,11 +245,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
     }
   }
 
-  // Show start page if no messages and no active research
-  const showStartPage = messages.length === 0 && !activeResearchTask
-
-  // Show research progress if active research
-  const showResearchProgress = activeResearchTask !== null
+  // Show start page if no messages
+  const showStartPage = messages.length === 0
 
   return (
     <div className={cn(className, 'min-h-0 flex flex-col')}>
@@ -388,29 +261,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
         />
       )}
 
-      {/* Research Progress */}
-      {showResearchProgress && (
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <AsyncResearchProgress
-            taskStatus={activeResearchTask!}
-            onCancel={handleCancelResearch}
-            onViewResult={handleViewResearchResult}
-            className="w-full max-w-[720px]"
-          />
-
-          {/* Clarification Dialog */}
-          {clarificationQuestions && (
-            <ClarificationDialogAsync
-              questions={clarificationQuestions}
-              onSubmit={handleClarificationSubmit}
-              className="w-full max-w-[720px] mt-4"
-            />
-          )}
-        </div>
-      )}
-
       {/* Regular Chat */}
-      {!showStartPage && !showResearchProgress && (
+      {!showStartPage && (
         <>
           {/* Messages */}
           <MessageList
