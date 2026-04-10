@@ -7,15 +7,38 @@ import { researchTaskService, ResearchTaskStatus as TaskStatus } from '@/service
 import { toast } from '@/components/ui'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { Header } from '@/components/layout/Header'
+import { useAuthStore } from '@/stores/authStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useState, useEffect } from 'react'
 
 export default function ResearchDetailPage() {
   const params = useParams()
   const router = useRouter()
   const taskId = params.id as string
 
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [taskStatus, setTaskStatus] = React.useState<TaskStatus | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [clarificationQuestions, setClarificationQuestions] = React.useState<string[] | null>(null)
+
+  const { isAuthenticated } = useAuthStore()
+  const { selectSession } = useSessionStore()
+
+  // 检测屏幕宽度
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(true)
+      } else {
+        setSidebarOpen(false)
+      }
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   // 加载任务状态
   React.useEffect(() => {
@@ -93,70 +116,88 @@ export default function ResearchDetailPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-slate-900 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-          <p className="text-slate-600 dark:text-slate-400">加载中...</p>
-        </div>
-      </div>
-    )
+  // 新建对话
+  const handleNewChat = () => {
+    selectSession(null)
+    router.push('/')
   }
 
-  if (!taskStatus) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-slate-600 dark:text-slate-400 mb-4">任务不存在或已过期</p>
-          <Button onClick={() => router.push('/')}>返回首页</Button>
-        </div>
-      </div>
-    )
+  // 选择会话
+  const handleSelectSession = (sessionId: string) => {
+    router.push(`/chat/${sessionId}`)
+  }
+
+  // 未认证时跳转
+  if (!isAuthenticated) {
+    router.push('/login')
+    return null
+  }
+
+  const getPhaseTitle = () => {
+    if (!taskStatus) return '深度研究'
+    switch (taskStatus.phase) {
+      case 'clarify': return '范围澄清'
+      case 'plan': return '研究规划'
+      case 'research': return '迭代研究'
+      case 'synthesize': return '综合报告'
+      default: return '深度研究'
+    }
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-900">
-      {/* Header */}
-      <div className="border-b border-slate-200 dark:border-slate-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center gap-4">
-          <button
-            onClick={() => router.push('/')}
-            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-          </button>
-          <div className="flex-1">
-            <h1 className="text-lg font-medium text-slate-900 dark:text-white truncate">
-              {taskStatus.phase === 'clarify' ? '范围澄清' :
-               taskStatus.phase === 'plan' ? '研究规划' :
-               taskStatus.phase === 'research' ? '迭代研究' :
-               taskStatus.phase === 'synthesize' ? '综合报告' : '深度研究'}
-            </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              任务 ID: {taskId.slice(0, 8)}...
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="h-screen flex bg-white dark:bg-slate-900">
+      {/* Sidebar */}
+      <Sidebar
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onNewChat={handleNewChat}
+        onSelectSession={handleSelectSession}
+      />
 
-      {/* Content */}
-      <div className="max-w-3xl mx-auto p-4">
-        <AsyncResearchProgress
-          taskStatus={taskStatus}
-          onCancel={handleCancel}
-          onViewResult={handleViewResult}
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <Header
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          title={taskStatus?.query?.slice(0, 30) || '深度研究'}
         />
 
-        {/* Clarification Dialog */}
-        {clarificationQuestions && (
-          <div className="mt-4">
-            <ClarificationDialogAsync
-              questions={clarificationQuestions}
-              onSubmit={handleClarificationSubmit}
-            />
-          </div>
-        )}
+        {/* Content */}
+        <div className="flex-1 overflow-auto">
+          {loading ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                <p className="text-slate-600 dark:text-slate-400">加载中...</p>
+              </div>
+            </div>
+          ) : !taskStatus ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-slate-600 dark:text-slate-400 mb-4">任务不存在或已过期</p>
+                <Button onClick={() => router.push('/')}>返回首页</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto p-4">
+              <AsyncResearchProgress
+                taskStatus={taskStatus}
+                onCancel={handleCancel}
+                onViewResult={handleViewResult}
+              />
+
+              {/* Clarification Dialog */}
+              {clarificationQuestions && (
+                <div className="mt-4">
+                  <ClarificationDialogAsync
+                    questions={clarificationQuestions}
+                    onSubmit={handleClarificationSubmit}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
