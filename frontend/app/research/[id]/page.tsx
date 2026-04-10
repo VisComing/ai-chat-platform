@@ -12,6 +12,7 @@ import { Header } from '@/components/layout/Header'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useState, useEffect } from 'react'
+import { checkAuth } from '@/stores/authStore'
 
 export default function ResearchDetailPage() {
   const params = useParams()
@@ -22,16 +23,27 @@ export default function ResearchDetailPage() {
   const [taskStatus, setTaskStatus] = React.useState<TaskStatus | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [clarificationQuestions, setClarificationQuestions] = React.useState<string[] | null>(null)
+  const [authChecked, setAuthChecked] = React.useState(false)
 
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, accessToken } = useAuthStore()
   const { selectSession } = useSessionStore()
 
-  // 未认证时跳转
+  // 认证检查 - 需要先验证 token 是否有效
   React.useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/login')
+    const verifyAuth = async () => {
+      if (accessToken) {
+        const isValid = await checkAuth()
+        if (!isValid) {
+          router.push('/login')
+        }
+        setAuthChecked(true)
+      } else {
+        router.push('/login')
+        setAuthChecked(true)
+      }
     }
-  }, [isAuthenticated, router])
+    verifyAuth()
+  }, [accessToken, router])
 
   // 检测屏幕宽度
   useEffect(() => {
@@ -47,9 +59,9 @@ export default function ResearchDetailPage() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // 加载任务状态
+  // 加载任务状态 - 需要认证检查完成后再加载
   React.useEffect(() => {
-    if (!taskId) return
+    if (!taskId || !authChecked) return
 
     const loadTask = async () => {
       try {
@@ -84,7 +96,7 @@ export default function ResearchDetailPage() {
     return () => {
       researchTaskService.stopPolling()
     }
-  }, [taskId])
+  }, [taskId, authChecked])
 
   // 取消研究
   const handleCancel = async () => {
@@ -165,11 +177,11 @@ export default function ResearchDetailPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
-          {loading ? (
+          {!authChecked || loading ? (
             <div className="h-full flex items-center justify-center">
               <div className="flex flex-col items-center gap-4">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                <p className="text-slate-600 dark:text-slate-400">加载中...</p>
+                <p className="text-slate-600 dark:text-slate-400">{!authChecked ? '验证登录状态...' : '加载中...'}</p>
               </div>
             </div>
           ) : !taskStatus ? (
