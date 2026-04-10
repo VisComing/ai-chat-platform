@@ -26,6 +26,7 @@ import {
 import { useState, useEffect } from 'react'
 import { researchTaskService, ResearchTaskListItem, getTaskId } from '@/services/researchTaskService'
 import { useAuthStore } from '@/stores/authStore'
+import { usePathname } from 'next/navigation'
 
 interface SidebarProps {
   isOpen: boolean
@@ -136,6 +137,7 @@ function groupSessions(sessions: Array<{
 
 export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDeleteCurrentSession }: SidebarProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const { logout } = useAuthStore()
 
   const {
@@ -147,7 +149,13 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
     isLoading,
   } = useSessionStore()
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'favorites' | 'archive' | 'research'>('chat')
+  // 根据当前路由确定初始 tab
+  const getInitialTab = (): 'chat' | 'favorites' | 'archive' | 'research' => {
+    if (pathname?.startsWith('/research')) return 'research'
+    return 'chat'
+  }
+
+  const [activeTab, setActiveTab] = useState<'chat' | 'favorites' | 'archive' | 'research'>(getInitialTab())
   const [searchQuery, setSearchQuery] = useState('')
 
   // 深度研究任务列表状态
@@ -173,6 +181,13 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
   })
 
   const sessionGroups = groupSessions(sortedSessions)
+
+  // 监听路由变化，自动切换 tab
+  useEffect(() => {
+    if (pathname?.startsWith('/research') && activeTab !== 'research') {
+      setActiveTab('research')
+    }
+  }, [pathname])
 
   // 加载深度研究任务列表
   useEffect(() => {
