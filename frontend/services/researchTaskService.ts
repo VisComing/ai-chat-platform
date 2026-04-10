@@ -219,12 +219,16 @@ class ResearchTaskService {
    * 执行一次轮询
    */
   private async pollOnce(): Promise<void> {
-    if (!this.currentTaskId || !this.pollCallback) return
+    // 捕获当前值，防止竞态条件（stopPolling可能在await期间被调用）
+    const taskId = this.currentTaskId
+    const callback = this.pollCallback
+
+    if (!taskId || !callback) return
 
     try {
-      const status = await this.getTaskStatus(this.currentTaskId)
+      const status = await this.getTaskStatus(taskId)
       this.consecutiveErrors = 0 // 重置错误计数
-      this.pollCallback(status)
+      callback(status)
 
       // 如果任务已完成，停止轮询
       if (['completed', 'failed', 'cancelled'].includes(status.status)) {
