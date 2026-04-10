@@ -44,6 +44,9 @@ export function ChatContainer({ className }: ChatContainerProps) {
   // State for prefilling input from suggestions
   const [prefillInput, setPrefillInput] = React.useState('')
 
+  // State for initialization
+  const [isInitializing, setIsInitializing] = React.useState(false)
+
   // Deep Research State
   const [activeResearchTask, setActiveResearchTask] = React.useState<TaskStatus | null>(null)
   const [researchLoading, setResearchLoading] = React.useState(false)
@@ -61,16 +64,21 @@ export function ChatContainer({ className }: ChatContainerProps) {
     const resumeIfNeeded = async () => {
       if (!currentSessionId || isInitializing) return
 
-      // Check if there's a streaming message that needs to be resumed
-      const messages = useChatStore.getState().messagesBySession[currentSessionId] || []
-      const streamingMessage = messages.find(m => m.status === 'streaming' && m.role === 'assistant')
+      setIsInitializing(true)
+      try {
+        // Check if there's a streaming message that needs to be resumed
+        const messages = useChatStore.getState().messagesBySession[currentSessionId] || []
+        const streamingMessage = messages.find(m => m.status === 'streaming' && m.role === 'assistant')
 
-      if (streamingMessage) {
-        console.log('[ChatContainer] Found streaming message, attempting to resume...')
-        const resumed = await useChatStore.getState().resumeSession(currentSessionId)
-        if (resumed) {
-          toast.success('已恢复之前的对话')
+        if (streamingMessage) {
+          console.log('[ChatContainer] Found streaming message, attempting to resume...')
+          const resumed = await useChatStore.getState().resumeSession(currentSessionId)
+          if (resumed) {
+            toast.success('已恢复之前的对话')
+          }
         }
+      } finally {
+        setIsInitializing(false)
       }
     }
 
@@ -367,6 +375,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
           onSend={handleStartPageSend}
           isLoading={isLoading}
           className="flex-1"
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
         />
       )}
 

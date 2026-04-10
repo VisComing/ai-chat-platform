@@ -452,25 +452,29 @@ function SearchIndicatorWithSources({
   const [expanded, setExpanded] = React.useState(false)
 
   return (
-    <div className="mb-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm overflow-hidden">
+    <div className="mb-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 dark:shadow-slate-900/20 overflow-hidden">
       {/* Header - always visible */}
-      <div className="p-3">
+      <div className="px-4 py-3 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 dark:from-blue-900/20 dark:to-indigo-900/10 border-b border-slate-200 dark:border-slate-700/50">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             {isSearching ? (
               <>
-                <div className="animate-spin">
-                  <Search className="w-4 h-4 text-blue-500" />
+                <div className="w-5 h-5 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <div className="animate-spin">
+                    <Search className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  </div>
                 </div>
-                <span className="text-blue-600 dark:text-blue-400">
-                  正在搜索 "{query}"...
+                <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
+                  正在搜索 &quot;{query}&quot;...
                 </span>
               </>
             ) : (
               <>
-                <Check className="w-4 h-4 text-green-500" />
-                <span className="text-blue-600 dark:text-blue-400">
-                  已找到 {sources.length} 条相关结果
+                <div className="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  已找到 <span className="text-blue-600 dark:text-blue-400 font-semibold">{sources.length}</span> 条相关结果
                 </span>
               </>
             )}
@@ -480,11 +484,11 @@ function SearchIndicatorWithSources({
           {!isSearching && sources.length > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-200"
             >
               <span>{expanded ? '收起' : '查看来源'}</span>
               <svg
-                className={cn("w-3 h-3 transition-transform", expanded && "rotate-180")}
+                className={cn("w-3.5 h-3.5 transition-transform duration-200", expanded && "rotate-180")}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -495,15 +499,15 @@ function SearchIndicatorWithSources({
           )}
         </div>
         {isSearching && (
-          <div className="mt-2 h-1 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 animate-pulse w-full" />
+          <div className="mt-3 h-1 bg-blue-200/50 dark:bg-blue-800/50 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 animate-pulse w-full" />
           </div>
         )}
       </div>
 
       {/* Sources List - expandable */}
       {!isSearching && expanded && sources.length > 0 && (
-        <div className="border-t border-blue-200 dark:border-blue-700 divide-y divide-blue-200 dark:divide-blue-700">
+        <div className="divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
           {sources.map((source, index) => (
             <SourceCardInline key={source.id || index} source={source} index={index + 1} />
           ))}
@@ -527,47 +531,70 @@ function SourceCardInline({ source, index }: { source: Source; index: number }) 
     }
   }, [source.url])
 
+  // Get favicon URL from hostname
+  const faviconUrl = React.useMemo(() => {
+    try {
+      const hostname = new URL(source.url).hostname
+      return `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`
+    } catch {
+      return null
+    }
+  }, [source.url])
+
   return (
     <a
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block px-3 py-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+      className="group block px-4 py-3 hover:bg-white dark:hover:bg-slate-800/50 transition-all duration-200"
     >
-      <div className="flex items-start gap-2">
-        {/* Citation Number */}
-        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 text-xs font-medium flex items-center justify-center">
+      <div className="flex items-start gap-3">
+        {/* Citation Number - Enhanced */}
+        <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white text-xs font-semibold flex items-center justify-center shadow-sm shadow-blue-500/20 group-hover:shadow-blue-500/30 group-hover:scale-105 transition-all duration-200">
           {index}
-        </span>
+        </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {/* Title */}
-          <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+          {/* Title - Enhanced with better typography */}
+          <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-relaxed">
             {source.title}
           </h4>
 
-          {/* Meta */}
-          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <Globe className="w-3 h-3" />
-            <span className="truncate">{hostname}</span>
+          {/* Meta - Enhanced with favicon */}
+          <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            {faviconUrl ? (
+              <img
+                src={faviconUrl}
+                alt=""
+                className="w-3.5 h-3.5 rounded-sm flex-shrink-0"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none'
+                }}
+              />
+            ) : (
+              <Globe className="w-3.5 h-3.5 flex-shrink-0" />
+            )}
+            <span className="truncate max-w-[150px] font-medium">{hostname}</span>
             {source.publishedTime && (
               <>
-                <span>•</span>
-                <Clock className="w-3 h-3" />
-                <span>{formatPublishedTime(source.publishedTime)}</span>
+                <span className="text-slate-300 dark:text-slate-600">•</span>
+                <span className="text-slate-400 dark:text-slate-500">{formatPublishedTime(source.publishedTime)}</span>
               </>
             )}
             {relevanceScore !== undefined && (
               <>
-                <span>•</span>
-                <span className="text-green-500">{relevanceScore}% 相关</span>
+                <span className="text-slate-300 dark:text-slate-500">•</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">{relevanceScore}% 相关</span>
               </>
             )}
           </div>
         </div>
 
-        <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        {/* External Link - Enhanced with hover effect */}
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-2 transition-all duration-200">
+          <ExternalLink className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+        </div>
       </div>
     </a>
   )
