@@ -37,6 +37,7 @@ export function ChatContainer({ className }: ChatContainerProps) {
     setUseAgent,
     enableThinking,
     setEnableThinking,
+    activeResearchTaskId,
   } = useChatStore()
 
   const { createSession, selectSession, currentSessionId } = useSessionStore()
@@ -110,17 +111,19 @@ export function ChatContainer({ className }: ChatContainerProps) {
     },
   }
 
-  // Check for active research task from localStorage on mount
+  // Check for active research task from store or localStorage on mount/change
   React.useEffect(() => {
-    const savedTaskId = safeLocalStorage.getItem('activeResearchTask')
-    if (savedTaskId) {
-      researchTaskService.getTaskStatus(savedTaskId).then((status) => {
+    // 优先使用 store 中的 taskId（来自侧边栏点击）
+    const taskIdToLoad = activeResearchTaskId || safeLocalStorage.getItem('activeResearchTask')
+
+    if (taskIdToLoad) {
+      researchTaskService.getTaskStatus(taskIdToLoad).then((status) => {
         // Show progress for pending, running, or paused tasks
         if (['pending', 'running', 'paused'].includes(status.status)) {
           setActiveResearchTask(status)
           // Start polling if running or pending
           if (status.status === 'running' || status.status === 'pending') {
-            researchTaskService.startPolling(savedTaskId, (updatedStatus) => {
+            researchTaskService.startPolling(taskIdToLoad, (updatedStatus) => {
               setActiveResearchTask(updatedStatus)
               // Handle clarification pause
               if (updatedStatus.status === 'paused' && updatedStatus.phase === 'clarify' && updatedStatus.clarificationQuestions) {
@@ -131,14 +134,14 @@ export function ChatContainer({ className }: ChatContainerProps) {
             setClarificationQuestions(status.clarificationQuestions)
           }
         } else {
-          // Task is completed/failed/cancelled, clear storage
+          // Task is completed/failed/cancelled, clear
           safeLocalStorage.removeItem('activeResearchTask')
         }
       }).catch(() => {
         safeLocalStorage.removeItem('activeResearchTask')
       })
     }
-  }, [])
+  }, [activeResearchTaskId])
 
   // Handle suggestion click from EmptyState
   const handleSuggestionClick = (text: string) => {

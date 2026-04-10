@@ -10,6 +10,7 @@ interface ChatState {
   messagesBySession: Record<string, Message[]>
   currentSessionId: string | null
   currentTaskId: string | null  // 当前运行中的任务 ID
+  activeResearchTaskId: string | null  // 当前选中的研究任务 ID
   isLoading: boolean
   streamingMessageId: string | null
   error: string | null
@@ -31,6 +32,7 @@ interface ChatState {
   setUseAgent: (useAgent: boolean) => void
   setEnableThinking: (enable: boolean) => void
   setOnSessionCreated: (callback: (sessionId: string) => void) => void
+  setActiveResearchTaskId: (taskId: string | null) => void
   resumeSession: (sessionId: string) => Promise<boolean> // 恢复会话（刷新后）
 }
 
@@ -40,6 +42,7 @@ export const useChatStore = create<ChatState>()(
       messagesBySession: {},
       currentSessionId: null,
       currentTaskId: null,
+      activeResearchTaskId: null,
       isLoading: false,
       streamingMessageId: null,
       error: null,
@@ -47,6 +50,10 @@ export const useChatStore = create<ChatState>()(
       useAgent: true,  // Default: Agent mode ENABLED
       enableThinking: false,  // Default: Deep thinking mode DISABLED
       onSessionCreated: undefined,
+
+      setActiveResearchTaskId: (taskId: string | null) => {
+        set({ activeResearchTaskId: taskId })
+      },
 
       getMessages: () => {
         const { messagesBySession, currentSessionId } = get()

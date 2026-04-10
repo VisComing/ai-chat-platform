@@ -31,6 +31,7 @@ interface SidebarProps {
   onNewChat: () => void
   onSelectSession: (sessionId: string) => void
   onDeleteCurrentSession?: () => void
+  onSelectResearchTask?: (taskId: string) => void
 }
 
 // 智能时间格式化
@@ -132,7 +133,7 @@ function groupSessions(sessions: Array<{
   return groups
 }
 
-export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDeleteCurrentSession }: SidebarProps) {
+export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDeleteCurrentSession, onSelectResearchTask }: SidebarProps) {
   const {
     sessions,
     currentSessionId,
@@ -343,9 +344,9 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
                 >
                   <button
                     onClick={() => {
-                      // 设置localStorage并跳转到主页恢复研究任务
-                      localStorage.setItem('activeResearchTask', task.taskId)
-                      window.location.href = '/'
+                      if (onSelectResearchTask) {
+                        onSelectResearchTask(task.taskId)
+                      }
                     }}
                     className="w-full h-full flex items-center gap-3 px-4 text-left"
                   >
