@@ -336,9 +336,9 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
                 暂无深度研究任务
               </div>
             ) : (
-              researchTasks.map((task) => (
+              researchTasks.map((task, index) => (
                 <div
-                  key={task.taskId}
+                  key={task.taskId || `research-task-${index}`}
                   className="group relative h-16 hover:bg-white/[0.03] rounded-lg mx-1 transition-all duration-200"
                 >
                   <button
