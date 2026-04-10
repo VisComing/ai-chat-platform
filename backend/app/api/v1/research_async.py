@@ -5,7 +5,7 @@ Deep Research Async API Endpoints
 import asyncio
 import logging
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
@@ -38,10 +38,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# 后台任务存储（用于跟踪运行中的任务）
-_background_tasks: dict = {}
-
-
 async def run_research_background(task_id: str, query: str, user_id: str, model: Optional[str] = None):
     """后台执行研究任务"""
     from app.tasks.research_tasks import run_research_workflow, update_task_status
@@ -72,15 +68,43 @@ async def run_research_background(task_id: str, query: str, user_id: str, model:
             error_message=str(e),
             error_phase="unknown"
         )
-    finally:
-        # 清理任务记录
-        if task_id in _background_tasks:
-            del _background_tasks[task_id]
+
+
+async def resume_research_background(task_id: str, query: str, user_id: str, model: str, clarified_requirements: str):
+    """后台恢复研究任务"""
+    from app.tasks.research_tasks import run_research_workflow, update_task_status
+    from app.models.research import ResearchTaskStatus
+
+    try:
+        logger.info(f"[Background Task] Resuming research task {task_id}")
+
+        await update_task_status(task_id, ResearchTaskStatus.RUNNING)
+
+        result = await run_research_workflow(
+            task_id=task_id,
+            query=query,
+            user_id=user_id,
+            model=model,
+            skip_clarification=True,
+            clarified_requirements=clarified_requirements,
+        )
+
+        logger.info(f"[Background Task] Research task {task_id} resumed and completed")
+
+    except Exception as e:
+        logger.error(f"[Background Task] Task {task_id} resume failed: {e}")
+        await update_task_status(
+            task_id,
+            ResearchTaskStatus.FAILED,
+            error_message=str(e),
+            error_phase="clarify"
+        )
 
 
 @router.post("/tasks", response_model=ApiResponse[ResearchTaskCreated])
 async def create_research_task(
     request: ResearchTaskCreate,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -132,15 +156,14 @@ async def create_research_task(
     # quota.total_tasks += 1
     # await db.commit()
 
-    # 4. 启动后台异步任务
-    task_coro = run_research_background(
-        task_id=task.id,
-        query=request.query,
-        user_id=user_id,
-        model=request.model,
+    # 4. 启动后台异步任务 (使用 FastAPI BackgroundTasks)
+    background_tasks.add_task(
+        run_research_background,
+        task.id,
+        request.query,
+        user_id,
+        request.model,
     )
-    asyncio.create_task(task_coro)
-    _background_tasks[task.id] = True  # 标记任务正在运行
 
     logger.info(f"[Research API] Task {task.id} created and started in background")
 
@@ -254,6 +277,7 @@ async def get_task_status(
 async def submit_clarification(
     task_id: str,
     request: ClarificationRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -310,38 +334,14 @@ async def submit_clarification(
     await db.commit()
 
     # 启动后台任务继续执行
-    async def resume_research_background():
-        from app.tasks.research_tasks import run_research_workflow, update_task_status
-        from app.models.research import ResearchTaskStatus
-
-        try:
-            await update_task_status(task_id, ResearchTaskStatus.RUNNING)
-
-            result = await run_research_workflow(
-                task_id=task_id,
-                query=task.query,
-                user_id=user_id,
-                model=task.model,
-                skip_clarification=True,
-                clarified_requirements=clarified_requirements,
-            )
-
-            logger.info(f"[Research API] Task {task_id} resumed and completed")
-
-        except Exception as e:
-            logger.error(f"[Research API] Task {task_id} resume failed: {e}")
-            await update_task_status(
-                task_id,
-                ResearchTaskStatus.FAILED,
-                error_message=str(e),
-                error_phase="clarify"
-            )
-        finally:
-            if task_id in _background_tasks:
-                del _background_tasks[task_id]
-
-    asyncio.create_task(resume_research_background())
-    _background_tasks[task_id] = True
+    background_tasks.add_task(
+        resume_research_background,
+        task_id,
+        task.query,
+        user_id,
+        task.model,
+        clarified_requirements,
+    )
 
     logger.info(f"[Research API] Task {task_id} clarification submitted, resuming in background")
 
