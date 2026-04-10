@@ -38,67 +38,67 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def run_research_background(task_id: str, query: str, user_id: str, model: Optional[str] = None):
-    """后台执行研究任务"""
-    from app.tasks.research_tasks import run_research_workflow, update_task_status
+def run_research_background(task_id: str, query: str, user_id: str, model: Optional[str] = None):
+    """后台执行研究任务（同步函数，使用独立线程运行）"""
+    from app.tasks.research_tasks import run_research_workflow, update_task_status, run_async
     from app.models.research import ResearchTaskStatus
 
-    try:
-        logger.info(f"[Background Task] Starting research task {task_id}")
+    logger.info(f"[Background Task] Starting research task {task_id}")
 
+    try:
         # 更新状态为运行中
-        await update_task_status(task_id, ResearchTaskStatus.RUNNING, started_at=datetime.utcnow())
+        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING, started_at=datetime.utcnow()))
 
         # 执行研究工作流
-        result = await run_research_workflow(
+        result = run_async(run_research_workflow(
             task_id=task_id,
             query=query,
             user_id=user_id,
             model=model,
             skip_clarification=False,
-        )
+        ))
 
         logger.info(f"[Background Task] Research task {task_id} completed: {result.get('status')}")
 
     except Exception as e:
-        logger.error(f"[Background Task] Task {task_id} failed: {e}")
-        await update_task_status(
+        logger.error(f"[Background Task] Task {task_id} failed: {e}", exc_info=True)
+        run_async(update_task_status(
             task_id,
             ResearchTaskStatus.FAILED,
             error_message=str(e),
             error_phase="unknown"
-        )
+        ))
 
 
-async def resume_research_background(task_id: str, query: str, user_id: str, model: str, clarified_requirements: str):
-    """后台恢复研究任务"""
-    from app.tasks.research_tasks import run_research_workflow, update_task_status
+def resume_research_background(task_id: str, query: str, user_id: str, model: str, clarified_requirements: str):
+    """后台恢复研究任务（同步函数，使用独立线程运行）"""
+    from app.tasks.research_tasks import run_research_workflow, update_task_status, run_async
     from app.models.research import ResearchTaskStatus
 
+    logger.info(f"[Background Task] Resuming research task {task_id}")
+
     try:
-        logger.info(f"[Background Task] Resuming research task {task_id}")
+        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING))
 
-        await update_task_status(task_id, ResearchTaskStatus.RUNNING)
-
-        result = await run_research_workflow(
+        result = run_async(run_research_workflow(
             task_id=task_id,
             query=query,
             user_id=user_id,
             model=model,
             skip_clarification=True,
             clarified_requirements=clarified_requirements,
-        )
+        ))
 
         logger.info(f"[Background Task] Research task {task_id} resumed and completed")
 
     except Exception as e:
-        logger.error(f"[Background Task] Task {task_id} resume failed: {e}")
-        await update_task_status(
+        logger.error(f"[Background Task] Task {task_id} resume failed: {e}", exc_info=True)
+        run_async(update_task_status(
             task_id,
             ResearchTaskStatus.FAILED,
             error_message=str(e),
             error_phase="clarify"
-        )
+        ))
 
 
 @router.post("/tasks", response_model=ApiResponse[ResearchTaskCreated])
