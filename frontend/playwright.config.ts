@@ -1,22 +1,28 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// 统一配置 - 从环境变量读取，提供默认值
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: [
     ['list'],
-    ['html', { open: 'never' }]
+    ['html', { open: 'never' }],
+    ['json', { outputFile: 'test-results/results.json' }]
   ],
-  
+
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: FRONTEND_URL,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    screenshot: 'on',
     video: 'retain-on-failure',
-    actionTimeout: 10000,
+    actionTimeout: 15000,
     navigationTimeout: 30000,
   },
 
@@ -27,22 +33,24 @@ export default defineConfig({
     },
   ],
 
-  // Don't start servers - assume they're already running
-  // webServer: [
-  //   {
-  //     command: 'npm run dev',
-  //     url: 'http://localhost:3002',
-  //     reuseExistingServer: true,
-  //   },
-  //   {
-  //     command: 'cd ../backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8001',
-  //     url: 'http://127.0.0.1:8001/health',
-  //     reuseExistingServer: true,
-  //   },
-  // ],
-  
-  timeout: 60000,
+  // 可选：自动启动服务
+  webServer: process.env.START_SERVERS ? [
+    {
+      command: 'npm run dev',
+      url: FRONTEND_URL,
+      reuseExistingServer: true,
+      timeout: 60000,
+    },
+    {
+      command: 'cd ../backend && uvicorn app.main:app --reload --port 8000',
+      url: `${BACKEND_URL}/health`,
+      reuseExistingServer: true,
+      timeout: 60000,
+    },
+  ] : undefined,
+
+  timeout: 120000,
   expect: {
-    timeout: 10000,
+    timeout: 15000,
   },
 });
