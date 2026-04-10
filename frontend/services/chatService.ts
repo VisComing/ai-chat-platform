@@ -25,7 +25,7 @@ class ChatService {
   async streamChat(
     request: Partial<ChatRequest>,
     onChunk: (chunk: StreamChunk) => void,
-    useAgent: boolean = true
+    enableSearch: boolean = true
   ): Promise<{ taskId: string | null }> {
     // Cancel any existing stream
     this.abortStream()
@@ -44,9 +44,9 @@ class ChatService {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    // Unified endpoint - useAgent parameter controls the mode
+    // Unified endpoint
     const endpoint = '/chat/stream'
-    if (DEBUG) console.log('[ChatService] useAgent:', useAgent, 'endpoint:', endpoint)
+    if (DEBUG) console.log('[ChatService] enableSearch:', enableSearch, 'endpoint:', endpoint)
 
     let currentTaskId: string | null = null
 
@@ -61,7 +61,7 @@ class ChatService {
           temperature: request.temperature,
           maxTokens: request.maxTokens,
           enableThinking: request.enableThinking,
-          useAgent: useAgent,  // Pass useAgent to backend
+          enableSearch: enableSearch,  // Pass enableSearch to backend
           tools: request.tools,
         }),
         signal,
@@ -85,7 +85,7 @@ class ChatService {
         const { done, value } = await reader.read()
         if (done) {
           // Process any remaining buffer content before exiting
-          if (buffer.trim()) {
+          if (buffer.trim() && !receivedComplete) {
             const lines = buffer.split('\n')
             for (const line of lines) {
               if (line.startsWith('data:')) {
@@ -96,9 +96,9 @@ class ChatService {
                   if (data.type === 'complete') {
                     onChunk(data)
                     receivedComplete = true
-                    return { taskId: currentTaskId }
+                  } else {
+                    onChunk(data)
                   }
-                  onChunk(data)
                 } catch (e) {
                   // Ignore parse errors for incomplete chunks
                 }
@@ -167,7 +167,7 @@ class ChatService {
 
               if (chunk.type === 'complete') {
                 receivedComplete = true
-                return { taskId: currentTaskId }
+                // 不立即 return，继续监听可能后续的 title 事件
               }
             } catch (e) {
               if (e instanceof Error && e.message !== '发生错误') {

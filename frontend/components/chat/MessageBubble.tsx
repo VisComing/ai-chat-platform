@@ -11,6 +11,7 @@ import { Avatar } from '@/components/ui'
 import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Search, ExternalLink, Clock, Globe } from 'lucide-react'
 import type { Message, Source } from '@/types'
 import { ThinkingBlock } from './ThinkingBlock'
+import { IterationsDisplay } from './IterationsDisplay'
 
 interface MessageBubbleProps {
   message: Message
@@ -70,8 +71,16 @@ export function MessageBubble({
 
       {/* Message Content */}
       <div className="flex-1 min-w-0">
-        {/* Search Indicator with Sources */}
-        {!isUser && message.metadata?.searchUsed && (
+        {/* Iterations Display - 多轮迭代内容 */}
+        {!isUser && message.metadata?.iterations && message.metadata.iterations.length > 0 && (
+          <IterationsDisplay
+            iterations={message.metadata.iterations}
+            isStreaming={isStreaming}
+          />
+        )}
+
+        {/* Legacy: Fallback for old messages without iterations */}
+        {!isUser && !message.metadata?.iterations && message.metadata?.searchUsed && (
           <SearchIndicatorWithSources
             query={message.metadata.searchQuery || ''}
             sources={message.metadata.sources || []}
@@ -79,8 +88,8 @@ export function MessageBubble({
           />
         )}
 
-        {/* Thinking Block */}
-        {message.metadata?.thinking && !isUser && (
+        {/* Legacy: Fallback thinking block */}
+        {!isUser && !message.metadata?.iterations && message.metadata?.thinking && (
           <ThinkingBlock
             content={message.metadata.thinking}
             isStreaming={isStreaming}
@@ -88,8 +97,8 @@ export function MessageBubble({
           />
         )}
 
-        {/* Tool Call Notification */}
-        {!isUser && message.metadata?.toolCall && !isStreaming && (
+        {/* Legacy: Fallback tool call notification */}
+        {!isUser && !message.metadata?.iterations && message.metadata?.toolCall && !isStreaming && (
           <div className="mb-2 p-2 bg-[#3b82f6]/8 rounded-lg text-sm flex items-center gap-2">
             <Search className="w-4 h-4 text-[#3b82f6]" />
             <span className="text-[#3b82f6]">

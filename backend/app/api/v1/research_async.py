@@ -5,7 +5,7 @@ Deep Research Async API Endpoints
 import asyncio
 import logging
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Optional, List
 
 from app.core.security import get_current_user_id

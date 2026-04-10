@@ -32,8 +32,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
     deleteMessage,
     setCurrentSession,
     setSelectedModel,
-    useAgent,
-    setUseAgent,
+    enableSearch,
+    setEnableSearch,
     enableThinking,
     setEnableThinking,
   } = useChatStore()
@@ -137,7 +137,7 @@ export function ChatContainer({ className }: ChatContainerProps) {
       handleThinkingChange(options.enableDeepThinking)
     }
     if (options?.enableSearch !== undefined) {
-      setUseAgent(options.enableSearch)
+      setEnableSearch(options.enableSearch)
     }
 
     // Regular chat
@@ -286,8 +286,8 @@ export function ChatContainer({ className }: ChatContainerProps) {
             showModelSelector={true}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
-            useAgent={useAgent}
-            onAgentChange={setUseAgent}
+            enableSearch={enableSearch}
+            onSearchChange={setEnableSearch}
             enableThinking={enableThinking}
             onThinkingChange={handleThinkingChange}
             initialValue={prefillInput}

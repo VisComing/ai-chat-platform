@@ -12,9 +12,7 @@ from datetime import datetime
 from typing import AsyncGenerator, Dict, List, Optional, Any
 
 from app.models import Session, Message, ChatTask
-from app.services.ai_service import ai_service
 from app.services.agent_service import agent_service
-from app.services.title_service import generate_and_push_title
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -109,7 +107,7 @@ class ChatTaskManager:
         ai_message: Message,
         messages: List[Dict[str, Any]],
         model: str,
-        use_agent: bool = False,
+        enable_search: bool = True,
         enable_thinking: bool = False,
     ):
         """
@@ -128,7 +126,7 @@ class ChatTaskManager:
                 ai_message=ai_message,
                 messages=messages,
                 model=model,
-                use_agent=use_agent,
+                enable_search=enable_search,
                 enable_thinking=enable_thinking,
             )
         )
@@ -148,56 +146,180 @@ class ChatTaskManager:
         ai_message: Message,
         messages: List[Dict[str, Any]],
         model: str,
-        use_agent: bool,
+        enable_search: bool,
         enable_thinking: bool,
     ):
         """
         执行聊天生成任务
 
-        核心生成逻辑，同时广播事件和更新数据库。
+        统一调用 agent_service.chat
         """
         accumulated_text = ""
         accumulated_thinking = ""
         start_time = time.time()
+        all_sources = []
 
         try:
-            if use_agent:
-                async for event in self._stream_agent_response(
-                    task=task,
-                    session=session,
-                    ai_message=ai_message,
-                    messages=messages,
-                    model=model,
-                    enable_thinking=enable_thinking,
-                ):
-                    if event.get("accumulated_text"):
-                        accumulated_text = event["accumulated_text"]
-            else:
-                async for event in self._stream_normal_response(
-                    task=task,
-                    session=session,
-                    ai_message=ai_message,
-                    messages=messages,
-                    model=model,
-                    enable_thinking=enable_thinking,
-                ):
-                    if event.get("accumulated_text"):
-                        accumulated_text = event["accumulated_text"]
+            # 统一调用 agent_service
+            async for event in agent_service.chat(
+                messages=messages,
+                model=model,
+                enable_search=enable_search,
+                enable_thinking=enable_thinking,
+            ):
+                # 检查任务是否被取消
+                if task.status == "cancelled":
+                    return
 
-            # 生成标题
-            if session.message_count == 2 and session.title == "新对话":
-                raw_content = messages[0].get("content", "") if messages else ""
-                if isinstance(raw_content, dict):
-                    user_msg_text = raw_content.get("text", str(raw_content))
-                else:
-                    user_msg_text = str(raw_content)
+                event_type = event.get("event")
+                event_data = event.get("data", {})
 
-                async for title_event in generate_and_push_title(
-                    session_id=session.id,
-                    user_message=user_msg_text,
-                    ai_response=accumulated_text,
-                ):
-                    await self.broadcast(task.id, title_event)
+                # 处理不同事件类型
+                if event_type == "text":
+                    chunk = event_data.get("content", "")
+                    accumulated_text += chunk
+
+                    # 定期更新数据库
+                    if len(accumulated_text) % 50 == 0:
+                        ai_message.content = {"type": "text", "text": accumulated_text}
+                        await ai_message.save()
+
+                    broadcast_event = {
+                        "event": "text",
+                        "data": json.dumps({
+                            "type": "text",
+                            "content": chunk,
+                            "messageId": ai_message.id,
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
+
+                elif event_type == "thinking":
+                    chunk = event_data.get("content", "")
+                    accumulated_thinking += chunk
+
+                    broadcast_event = {
+                        "event": "thinking",
+                        "data": json.dumps({
+                            "type": "thinking",
+                            "content": chunk,
+                            "iteration": event_data.get("iteration"),
+                            "messageId": ai_message.id,
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
+
+                elif event_type == "tool_call":
+                    query = event_data.get("query", "")
+                    iteration = event_data.get("iteration")
+
+                    broadcast_event = {
+                        "event": "tool_call",
+                        "data": json.dumps({
+                            "type": "tool_call",
+                            "tool": event_data.get("tool", "web_search"),
+                            "toolName": event_data.get("toolName", "web_search"),
+                            "query": query,
+                            "toolArgs": event_data.get("toolArgs", {"query": query}),
+                            "iteration": iteration,
+                            "messageId": ai_message.id,
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
+
+                elif event_type == "search_result":
+                    sources = event_data.get("sources", [])
+                    all_sources.extend(sources)
+
+                    broadcast_event = {
+                        "event": "search_result",
+                        "data": json.dumps({
+                            "type": "search_result",
+                            "query": event_data.get("query", ""),
+                            "sources": sources,
+                            "resultCount": len(sources),
+                            "iteration": event_data.get("iteration"),
+                            "messageId": ai_message.id,
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
+
+                elif event_type == "complete":
+                    search_used = event_data.get("search_used", False)
+                    sources = event_data.get("sources", [])
+                    citations = event_data.get("citations", [])
+
+                    # 保存最终消息
+                    ai_message.content = {"type": "text", "text": accumulated_text}
+                    ai_message.status = "completed"
+                    ai_message.meta = {
+                        "model": model,
+                        "tokens": {
+                            "input": sum(len(str(m.get("content", ""))) for m in messages) // 4,
+                            "output": len(accumulated_text) // 4,
+                        },
+                        "duration": time.time() - start_time,
+                        "search_used": search_used,
+                        "sources": sources,
+                        "citations": citations,
+                    }
+                    if accumulated_thinking:
+                        ai_message.meta["thinking"] = accumulated_thinking
+                    await ai_message.save()
+
+                    # 更新会话
+                    session.message_count += 1
+                    session.last_message_at = datetime.utcnow()
+                    await session.save()
+
+                    # 发送 complete 事件
+                    broadcast_event = {
+                        "event": "complete",
+                        "data": json.dumps({
+                            "type": "complete",
+                            "messageId": ai_message.id,
+                            "search_used": search_used,
+                            "sources": sources,
+                            "citations": citations,
+                            "meta": ai_message.meta,
+                            "iterations": event_data.get("iterations", 0),
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
+
+                    # 异步生成标题
+                    if session.message_count == 2 and session.title == "新对话":
+                        raw_content = messages[0].get("content", "") if messages else ""
+                        if isinstance(raw_content, dict):
+                            user_msg_text = raw_content.get("text", str(raw_content))
+                        else:
+                            user_msg_text = str(raw_content)
+
+                        logger.info(f"[ChatTask] Starting title generation for session {session.id}")
+                        asyncio.create_task(
+                            self._generate_title_async(
+                                task_id=task.id,
+                                session_id=session.id,
+                                user_message=user_msg_text,
+                                ai_response=accumulated_text,
+                            )
+                        )
+
+                elif event_type == "error":
+                    error_msg = event_data.get("content", "Unknown error")
+                    ai_message.content = {"type": "text", "text": f"错误: {error_msg}"}
+                    ai_message.status = "error"
+                    await ai_message.save()
+
+                    broadcast_event = {
+                        "event": "error",
+                        "data": json.dumps({
+                            "type": "error",
+                            "content": error_msg,
+                            "messageId": ai_message.id,
+                        }, ensure_ascii=False),
+                    }
+                    await self.broadcast(task.id, broadcast_event)
 
             # 任务完成
             task.status = "completed"
@@ -230,245 +352,49 @@ class ChatTaskManager:
                 }, ensure_ascii=False),
             })
 
-    async def _stream_normal_response(
+    async def _generate_title_async(
         self,
-        task: ChatTask,
-        session: Session,
-        ai_message: Message,
-        messages: List[Dict[str, Any]],
-        model: str,
-        enable_thinking: bool,
-    ) -> AsyncGenerator[dict, None]:
-        """普通聊天模式"""
-        accumulated_text = ""
-        accumulated_thinking = ""
-        start_time = time.time()
+        task_id: str,
+        session_id: str,
+        user_message: str,
+        ai_response: str,
+    ):
+        """
+        异步生成标题并广播事件
 
-        if ai_service.is_thinking_model(model):
-            async for chunk in ai_service.chat_completion_with_thinking(messages, model=model):
-                # 检查任务是否被取消
-                if task.status == "cancelled":
-                    return
+        作为后台任务执行，不阻塞主流程。
+        """
+        logger.info(f"[ChatTask] _generate_title_async started for task {task_id}")
+        try:
+            # 使用 agent_service 生成标题
+            title = await agent_service.generate_title(
+                user_message=user_message,
+                ai_response=ai_response,
+            )
 
-                if chunk.type == "thinking":
-                    accumulated_thinking += chunk.content
-                    event = {
-                        "event": "thinking",
-                        "data": json.dumps({
-                            "type": "thinking",
-                            "content": chunk.content,
-                            "messageId": ai_message.id,
-                        }, ensure_ascii=False),
-                    }
-                    await self.broadcast(task.id, event)
-                    yield event
+            logger.info(f"[ChatTask] Generated title: {title}")
 
-                elif chunk.type == "text":
-                    accumulated_text += chunk.content
-
-                    # 定期更新数据库
-                    if len(accumulated_text) % 50 == 0:
-                        ai_message.content = {"type": "text", "text": accumulated_text}
-                        await ai_message.save()
-
-                    event = {
-                        "event": "text",
-                        "data": json.dumps({
-                            "type": "text",
-                            "content": chunk.content,
-                            "messageId": ai_message.id,
-                        }, ensure_ascii=False),
-                    }
-                    await self.broadcast(task.id, event)
-                    yield event
-
-                elif chunk.type == "error":
-                    event = {
-                        "event": "error",
-                        "data": json.dumps({
-                            "type": "error",
-                            "content": chunk.content,
-                            "messageId": ai_message.id,
-                        }),
-                    }
-                    await self.broadcast(task.id, event)
-                    yield event
-                    return
-        else:
-            async for chunk in ai_service.chat_completion(messages, model=model):
-                if task.status == "cancelled":
-                    return
-
-                accumulated_text += chunk
-
-                if len(accumulated_text) % 50 == 0:
-                    ai_message.content = {"type": "text", "text": accumulated_text}
-                    await ai_message.save()
-
-                event = {
-                    "event": "text",
-                    "data": json.dumps({
-                        "type": "text",
-                        "content": chunk,
-                        "messageId": ai_message.id,
-                    }, ensure_ascii=False),
-                }
-                await self.broadcast(task.id, event)
-                yield event
-
-        # 完成
-        ai_message.content = {"type": "text", "text": accumulated_text}
-        ai_message.status = "completed"
-        ai_message.meta = {
-            "model": model,
-            "tokens": {
-                "input": sum(len(str(m.get("content", ""))) for m in messages) // 4,
-                "output": len(accumulated_text) // 4,
-            },
-            "duration": time.time() - start_time,
-        }
-        if accumulated_thinking:
-            ai_message.meta["thinking"] = accumulated_thinking
-        await ai_message.save()
-
-        session.message_count += 1
-        session.last_message_at = datetime.utcnow()
-        await session.save()
-
-        event = {
-            "event": "complete",
-            "data": json.dumps({
-                "type": "complete",
-                "messageId": ai_message.id,
-                "meta": ai_message.meta,
-                "hasThinking": bool(accumulated_thinking),
-            }, ensure_ascii=False),
-        }
-        await self.broadcast(task.id, event)
-        yield event
-        yield {"accumulated_text": accumulated_text}
-
-    async def _stream_agent_response(
-        self,
-        task: ChatTask,
-        session: Session,
-        ai_message: Message,
-        messages: List[Dict[str, Any]],
-        model: str,
-        enable_thinking: bool,
-    ) -> AsyncGenerator[dict, None]:
-        """Agent 模式"""
-        accumulated_text = ""
-        start_time = time.time()
-
-        async for event in agent_service.chat(messages, model=model, enable_thinking=enable_thinking):
-            if task.status == "cancelled":
-                return
-
-            event_type = event.get("event")
-            event_data = event.get("data", {})
-
-            if event_type == "text":
-                chunk = event_data.get("content", "")
-                accumulated_text += chunk
-
-                if len(accumulated_text) % 50 == 0:
-                    ai_message.content = {"type": "text", "text": accumulated_text}
-                    await ai_message.save()
-
-                broadcast_event = {
-                    "event": "text",
-                    "data": json.dumps({
-                        "type": "text",
-                        "content": chunk,
-                        "messageId": ai_message.id,
-                    }, ensure_ascii=False),
-                }
-                await self.broadcast(task.id, broadcast_event)
-                yield broadcast_event
-
-            elif event_type == "tool_call":
-                broadcast_event = {
-                    "event": "tool_call",
-                    "data": json.dumps({
-                        "type": "tool_call",
-                        "tool": "web_search",
-                        "query": event_data.get("query", ""),
-                        "messageId": ai_message.id,
-                    }, ensure_ascii=False),
-                }
-                await self.broadcast(task.id, broadcast_event)
-                yield broadcast_event
-
-            elif event_type == "thinking":
-                broadcast_event = {
-                    "event": "thinking",
-                    "data": json.dumps({
-                        "type": "thinking",
-                        "content": event_data.get("content", ""),
-                        "status": event_data.get("status", ""),
-                        "messageId": ai_message.id,
-                    }, ensure_ascii=False),
-                }
-                await self.broadcast(task.id, broadcast_event)
-                yield broadcast_event
-
-            elif event_type == "complete":
-                search_used = event_data.get("search_used", False)
-                sources = event_data.get("sources", [])
-                citations = event_data.get("citations", [])
-
-                ai_message.content = {"type": "text", "text": accumulated_text}
-                ai_message.status = "completed"
-                ai_message.meta = {
-                    "model": model,
-                    "tokens": {
-                        "input": sum(len(str(m.get("content", ""))) for m in messages) // 4,
-                        "output": len(accumulated_text) // 4,
-                    },
-                    "duration": time.time() - start_time,
-                    "search_used": search_used,
-                    "sources": sources,
-                    "citations": citations,
-                }
-                await ai_message.save()
-
-                session.message_count += 1
-                session.last_message_at = datetime.utcnow()
+            # 更新数据库
+            session = await Session.find_one(Session.id == session_id)
+            if session:
+                session.title = title
+                session.updated_at = datetime.utcnow()
                 await session.save()
 
-                broadcast_event = {
-                    "event": "complete",
-                    "data": json.dumps({
-                        "type": "complete",
-                        "messageId": ai_message.id,
-                        "search_used": search_used,
-                        "sources": sources,
-                        "citations": citations,
-                        "meta": ai_message.meta,
-                    }, ensure_ascii=False),
-                }
-                await self.broadcast(task.id, broadcast_event)
-                yield broadcast_event
+            # 广播 title 事件
+            title_event = {
+                "event": "title",
+                "data": json.dumps({
+                    "type": "title",
+                    "title": title,
+                    "sessionId": session_id,
+                }, ensure_ascii=False),
+            }
+            await self.broadcast(task_id, title_event)
+            logger.info(f"[ChatTask] Title event broadcasted for session {session_id}")
 
-            elif event_type == "error":
-                error_msg = event_data.get("content", "Unknown error")
-                ai_message.content = {"type": "text", "text": f"Agent错误: {error_msg}"}
-                ai_message.status = "error"
-                await ai_message.save()
-
-                broadcast_event = {
-                    "event": "error",
-                    "data": json.dumps({
-                        "type": "error",
-                        "content": error_msg,
-                        "messageId": ai_message.id,
-                    }),
-                }
-                await self.broadcast(task.id, broadcast_event)
-                yield broadcast_event
-
-        yield {"accumulated_text": accumulated_text}
+        except Exception as e:
+            logger.error(f"[ChatTask] Title generation failed: {e}")
 
     def _on_task_complete(self, task_id: str):
         """任务完成回调"""
@@ -514,7 +440,6 @@ class ChatTaskManager:
 
         用于刷新页面后恢复订阅。
         """
-        # Use find().sort().first_or_none() instead of find_one().sort()
         return await ChatTask.find(
             ChatTask.session_id == session_id,
             ChatTask.user_id == user_id,
@@ -530,14 +455,12 @@ class ChatTaskManager:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
 
-        # Use proper Beanie $in operator syntax
         old_tasks = await ChatTask.find(
             {"status": {"$in": ["completed", "failed", "cancelled"]}, "completed_at": {"$lt": cutoff}}
         ).to_list()
 
         for task in old_tasks:
             await task.delete()
-            # 清理事件队列
             if task.id in self._event_queues:
                 del self._event_queues[task.id]
 

@@ -13,9 +13,10 @@ interface ThinkingBlockProps {
   content: string
   isStreaming?: boolean
   isDeepThinking?: boolean
+  label?: string // Optional label for different iteration types
 }
 
-export function ThinkingBlock({ content, isStreaming, isDeepThinking }: ThinkingBlockProps) {
+export function ThinkingBlock({ content, isStreaming, isDeepThinking, label }: ThinkingBlockProps) {
   const [isExpanded, setIsExpanded] = React.useState(false)
 
   // Auto-expand when streaming starts, collapse when done
@@ -46,7 +47,7 @@ export function ThinkingBlock({ content, isStreaming, isDeepThinking }: Thinking
 
         {/* Title */}
         <span className="flex-1 text-sm font-medium text-[#3b82f6]">
-          深度思考
+          {label || '深度思考'}
           {!isExpanded && !isStreaming && (
             <span className="ml-2 text-xs text-[#94a3b8]">
               ({stepCount} 步)
