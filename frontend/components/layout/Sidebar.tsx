@@ -343,8 +343,9 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
                 >
                   <button
                     onClick={() => {
-                      // 跳转到任务详情或打开研究进度
-                      window.location.href = `/research/${task.taskId}`
+                      // 设置localStorage并跳转到主页恢复研究任务
+                      localStorage.setItem('activeResearchTask', task.taskId)
+                      window.location.href = '/'
                     }}
                     className="w-full h-full flex items-center gap-3 px-4 text-left"
                   >
