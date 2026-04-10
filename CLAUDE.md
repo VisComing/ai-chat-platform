@@ -34,7 +34,36 @@
 - Avoid AI tools name (like Codex, Claude, Grok, Gemini, ...) in code comments or git commit message (including authorship) or PR body.
 
 ## 其余事项
-- 联网搜索优先使用websearch MCP
+- 聂网搜索优先使用websearch MCP
+
+## 开发注意事项
+
+### Python 缓存问题
+修改后端代码后，若发现修改未生效：
+- 原因：`__pycache__` 目录中的 `.pyc` 文件缓存了旧代码
+- 解决：清除缓存后重启
+```bash
+cd backend
+find . -type d -name "__pycache__" -exec rm -rf {} +
+uvicorn app.main:app --reload
+```
+- uvicorn --reload 会检测源文件变化，但有时需要手动清除缓存
+
+### 百炼 API 深度思考控制
+使用百炼 API 调用支持深度思考的模型（如 glm-5, qwen3.5-plus）时：
+- `enable_thinking` 参数必须**显式设置**，不能省略
+- 省略参数 ≠ `enable_thinking: false`
+- 正确做法：
+  - 禁用深度思考：`payload["enable_thinking"] = false`
+  - 启用深度思考：`payload["enable_thinking"] = true`
+- 模型会返回 `reasoning_content`（思考内容）和 `content`（回复内容）
+
+### SSE 多轮迭代展示
+Agent 执行联网搜索时会有多轮迭代，每轮内容需区分展示：
+- 数据结构：使用 `iterations[]` 数组，每轮包含 `thinking`, `toolCall`, `searchResult`
+- 迭代标识：`iteration: number | 'final'`（数字表示第几轮，'final' 表示最终轮）
+- 前端渲染：按顺序展示各区块（思考 → 工具调用 → 搜索结果 → 最终思考 → 回复）
+- 兼容性：保留 legacy 字段（`metadata.thinking`, `metadata.toolCall`）向后兼容
 
 # AI对话平台 - Claude Code 项目指南
 
@@ -63,8 +92,8 @@ ai-chat-platform/
 │   │   ├── models/           # SQLAlchemy模型
 │   │   ├── schemas/          # Pydantic schemas
 │   │   └ services/           # 业务服务层
-│   │   │   ├── ai_service.py      # AI对话服务
-│   │   │   ├── agent_service.py   # LangGraph Agent服务
+│   │   │   ├── agent_service.py   # 统一Agent服务（对话+搜索+标题生成）
+│   │   │   ├── chat_task_service.py # 聊天任务管理
 │   │   │   └ search_service.py    # 联网搜索服务
 │   ├── tests/                # 测试文件
 │   └ requirements.txt        # Python依赖
@@ -80,8 +109,7 @@ ai-chat-platform/
 ### 后端API (FastAPI)
 - `/api/v1/auth` - 认证 (注册、登录、刷新Token)
 - `/api/v1/sessions` - 会话管理 (CRUD、置顶、归档)
-- `/api/v1/chat/stream` - 普通对话 SSE流式接口
-- `/api/v1/chat/agent/stream` - Agent对话 SSE流式接口 (带联网搜索)
+- `/api/v1/chat/stream` - 统一对话 SSE流式接口（通过 enableSearch 控制联网搜索）
 - `/api/v1/files` - 文件上传/下载
 - `/health` - 健康检查
 
