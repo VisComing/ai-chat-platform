@@ -331,6 +331,7 @@ class ResearchTaskCreated(BaseModel):
 class ResearchTaskStatus(BaseModel):
     """研究任务状态响应"""
     taskId: str = Field(alias="id")
+    query: Optional[str] = None  # 研究查询内容
     status: str
     phase: str
     phaseStatus: str = Field(alias="phase_status")

@@ -259,6 +259,7 @@ async def get_task_status(
         success=True,
         data=ResearchTaskStatusSchema(
             taskId=task.id,
+            query=task.query,
             status=task.status,
             phase=task.phase,
             phaseStatus=task.phase_status,

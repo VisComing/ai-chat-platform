@@ -49,6 +49,7 @@ export interface ResearchTaskCreated {
 
 export interface ResearchTaskStatus {
   taskId: string
+  query?: string  // Research query/topic
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
   phase: 'clarify' | 'plan' | 'research' | 'synthesize'
   phaseStatus: 'started' | 'progress' | 'completed' | 'waiting'
@@ -76,12 +77,18 @@ export interface ResearchTaskResult {
 
 export interface ResearchTaskListItem {
   taskId: string
+  id?: string  // Backend may serialize as 'id' due to Pydantic alias
   query: string
   status: string
   phase: string
   createdAt: string
   completedAt?: string
   resultUrl?: string
+}
+
+// Helper to get task ID from either field
+export function getTaskId(task: ResearchTaskListItem): string {
+  return task.taskId || task.id || ''
 }
 
 export interface UserQuotaStatus {

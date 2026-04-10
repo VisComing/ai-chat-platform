@@ -3,6 +3,7 @@
 import { cn } from '@/lib/utils'
 import { Button, SessionItemSkeleton } from '@/components/ui'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useRouter } from 'next/navigation'
 import {
   Menu,
   Plus,
@@ -23,7 +24,8 @@ import {
   Loader2,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { researchTaskService, ResearchTaskListItem } from '@/services/researchTaskService'
+import { researchTaskService, ResearchTaskListItem, getTaskId } from '@/services/researchTaskService'
+import { useAuthStore } from '@/stores/authStore'
 
 interface SidebarProps {
   isOpen: boolean
@@ -133,6 +135,9 @@ function groupSessions(sessions: Array<{
 }
 
 export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDeleteCurrentSession }: SidebarProps) {
+  const router = useRouter()
+  const { logout } = useAuthStore()
+
   const {
     sessions,
     currentSessionId,
@@ -180,9 +185,12 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
     setResearchLoading(true)
     try {
       const tasks = await researchTaskService.listTasks({ limit: 50 })
-      setResearchTasks(tasks)
-    } catch (error) {
-      console.error('加载研究任务失败:', error)
+      console.log('[Sidebar] Loaded research tasks:', tasks)
+      setResearchTasks(tasks || [])
+    } catch (error: any) {
+      console.error('[Sidebar] 加载研究任务失败:', error)
+      // 如果是 401 错误，不清除任务列表，保持空数组
+      setResearchTasks([])
     } finally {
       setResearchLoading(false)
     }
@@ -336,34 +344,41 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
                 暂无深度研究任务
               </div>
             ) : (
-              researchTasks.map((task, index) => (
-                <div
-                  key={task.taskId || `research-task-${index}`}
-                  className="group relative h-16 hover:bg-white/[0.03] rounded-lg mx-1 transition-all duration-200"
-                >
-                  <button
-                    onClick={() => {
-                      // 使用 URL 导航到研究任务详情页
-                      window.location.href = `/research/${task.taskId}`
-                    }}
-                    className="w-full h-full flex items-center gap-3 px-4 text-left"
-                  >
-                    <Sparkles className={cn('w-4 h-4 shrink-0', getResearchStatusColor(task.status))} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">
-                        {task.query}
-                      </p>
-                      <div className="flex items-center gap-2 text-xs text-[#64748b]">
-                        <span className={getResearchStatusColor(task.status)}>
-                          {getResearchStatusText(task.status)}
-                        </span>
-                        <span>·</span>
-                        <span>{formatSmartTime(task.createdAt)}</span>
-                      </div>
+              researchTasks.map((task, index) => {
+                  const taskId = getTaskId(task)
+                  return (
+                    <div
+                      key={taskId || `research-task-${index}`}
+                      className="group relative h-16 hover:bg-white/[0.03] rounded-lg mx-1 transition-all duration-200"
+                    >
+                      <button
+                        onClick={() => {
+                          // 使用 router 导航到研究任务详情页
+                          if (taskId) {
+                            router.push(`/research/${taskId}`)
+                          } else {
+                            console.error('[Sidebar] Invalid taskId:', task)
+                          }
+                        }}
+                        className="w-full h-full flex items-center gap-3 px-4 text-left"
+                      >
+                        <Sparkles className={cn('w-4 h-4 shrink-0', getResearchStatusColor(task.status))} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white truncate">
+                            {task.query}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-[#64748b]">
+                            <span className={getResearchStatusColor(task.status)}>
+                              {getResearchStatusText(task.status)}
+                            </span>
+                            <span>·</span>
+                            <span>{formatSmartTime(task.createdAt)}</span>
+                          </div>
+                        </div>
+                      </button>
                     </div>
-                  </button>
-                </div>
-              ))
+                  )
+                })
             )
           ) : isLoading ? (
             <div key="sessions-loading">
@@ -426,6 +441,8 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
 function UserMenu() {
   const [showMenu, setShowMenu] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
+  const router = useRouter()
+  const { logout } = useAuthStore()
 
   const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
     setTheme(newTheme)
@@ -438,6 +455,12 @@ function UserMenu() {
       document.documentElement.classList.toggle('dark', prefersDark)
     }
     setShowMenu(false)
+  }
+
+  const handleLogout = () => {
+    logout()
+    setShowMenu(false)
+    router.push('/login')
   }
 
   return (
@@ -498,7 +521,7 @@ function UserMenu() {
               帮助中心
             </button>
             <button
-              onClick={() => setShowMenu(false)}
+              onClick={handleLogout}
               className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-white/[0.05]"
             >
               <LogOut className="w-4 h-4" />
