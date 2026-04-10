@@ -194,7 +194,28 @@ export async function autoLoginTestUser(): Promise<boolean> {
 
 // Check if user is authenticated
 export async function checkAuth(): Promise<boolean> {
-  const { accessToken } = useAuthStore.getState()
+  // 先尝试从 localStorage 直接读取（处理 SSR hydration 问题）
+  let accessToken = useAuthStore.getState().accessToken
+
+  if (!accessToken) {
+    try {
+      const stored = localStorage.getItem('auth-storage')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        accessToken = parsed?.state?.accessToken
+        // 如果 localStorage 有 token，同步到 store
+        if (accessToken) {
+          useAuthStore.setState({
+            accessToken,
+            refreshToken: parsed?.state?.refreshToken,
+          })
+        }
+      }
+    } catch (e) {
+      console.error('[Auth] Failed to read localStorage:', e)
+    }
+  }
+
   if (!accessToken) return false
 
   try {

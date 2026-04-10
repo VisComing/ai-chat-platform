@@ -9,10 +9,9 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore, checkAuth, autoLoginTestUser } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useState, useEffect } from 'react'
-import { checkAuth } from '@/stores/authStore'
 
 export default function ResearchDetailPage() {
   const params = useParams()
@@ -23,27 +22,32 @@ export default function ResearchDetailPage() {
   const [taskStatus, setTaskStatus] = React.useState<TaskStatus | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [clarificationQuestions, setClarificationQuestions] = React.useState<string[] | null>(null)
-  const [authChecked, setAuthChecked] = React.useState(false)
+  const [isInitializing, setIsInitializing] = React.useState(true)
 
-  const { isAuthenticated, accessToken } = useAuthStore()
   const { selectSession } = useSessionStore()
 
-  // 认证检查 - 需要先验证 token 是否有效
+  // Initialize auth
   React.useEffect(() => {
-    const verifyAuth = async () => {
-      if (accessToken) {
-        const isValid = await checkAuth()
-        if (!isValid) {
-          router.push('/login')
+    const init = async () => {
+      try {
+        const isAuthed = await checkAuth()
+
+        if (!isAuthed) {
+          const autoLoginSuccess = await autoLoginTestUser()
+          if (!autoLoginSuccess) {
+            router.push('/login')
+            return
+          }
         }
-        setAuthChecked(true)
-      } else {
+
+        setIsInitializing(false)
+      } catch (error) {
+        console.error('[Research] Init failed:', error)
         router.push('/login')
-        setAuthChecked(true)
       }
     }
-    verifyAuth()
-  }, [accessToken, router])
+    init()
+  }, [router])
 
   // 检测屏幕宽度
   useEffect(() => {
@@ -61,7 +65,7 @@ export default function ResearchDetailPage() {
 
   // 加载任务状态 - 需要认证检查完成后再加载
   React.useEffect(() => {
-    if (!taskId || !authChecked) return
+    if (!taskId || isInitializing) return
 
     const loadTask = async () => {
       try {
@@ -96,7 +100,7 @@ export default function ResearchDetailPage() {
     return () => {
       researchTaskService.stopPolling()
     }
-  }, [taskId, authChecked])
+  }, [taskId, isInitializing])
 
   // 取消研究
   const handleCancel = async () => {
@@ -177,11 +181,11 @@ export default function ResearchDetailPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
-          {!authChecked || loading ? (
+          {isInitializing || loading ? (
             <div className="h-full flex items-center justify-center">
               <div className="flex flex-col items-center gap-4">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                <p className="text-slate-600 dark:text-slate-400">{!authChecked ? '验证登录状态...' : '加载中...'}</p>
+                <p className="text-slate-600 dark:text-slate-400">{isInitializing ? '验证登录状态...' : '加载中...'}</p>
               </div>
             </div>
           ) : !taskStatus ? (
