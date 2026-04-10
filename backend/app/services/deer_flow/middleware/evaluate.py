@@ -10,7 +10,7 @@ from app.services.deer_flow.state import DeerFlowState
 from app.services.deer_flow.middleware.base import ProgressMiddleware
 from app.services.deep_research_graph import create_llm, parse_llm_json_response
 from app.services.deep_research_prompts import EVALUATE_PROMPT, CURRENT_DATE
-from app.services.search_service import search_service
+from app.services.search_service import search_service, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class EvaluateMiddleware(ProgressMiddleware):
 
         llm = create_llm(model)
         formatted = search_service.format_results_for_llm(
-            [search_service.SearchResult(**r) for r in results]
+            [SearchResult(**r) for r in results]
         )
 
         prompt = EVALUATE_PROMPT.format(

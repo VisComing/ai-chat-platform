@@ -15,7 +15,7 @@ from app.services.deer_flow.state import (
     SubTaskStatus,
     SearchStrategy,
 )
-from app.services.search_service import search_service
+from app.services.search_service import search_service, SearchResult
 from app.services.deep_research_graph import create_llm, parse_llm_json_response
 from app.services.deep_research_prompts import EVALUATE_PROMPT, CURRENT_DATE
 from app.core.config import settings
@@ -247,7 +247,7 @@ class SubAgent:
 
         llm = create_llm(self.model)
         formatted = search_service.format_results_for_llm(
-            [search_service.SearchResult(**r) for r in results]
+            [SearchResult(**r) for r in results]
         )
 
         prompt = EVALUATE_PROMPT.format(
