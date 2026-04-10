@@ -327,12 +327,12 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
           {activeTab === 'research' ? (
             // 深度研究任务列表
             researchLoading ? (
-              <div className="p-4 text-center text-[#64748b] text-sm">
+              <div key="research-loading" className="p-4 text-center text-[#64748b] text-sm">
                 <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
                 加载中...
               </div>
             ) : researchTasks.length === 0 ? (
-              <div className="p-4 text-center text-[#64748b] text-sm">
+              <div key="research-empty" className="p-4 text-center text-[#64748b] text-sm">
                 暂无深度研究任务
               </div>
             ) : (
@@ -366,13 +366,13 @@ export function Sidebar({ isOpen, onToggle, onNewChat, onSelectSession, onDelete
               ))
             )
           ) : isLoading ? (
-            <>
+            <div key="sessions-loading">
               <SessionItemSkeleton />
               <SessionItemSkeleton />
               <SessionItemSkeleton />
-            </>
+            </div>
           ) : sessionGroups.length === 0 ? (
-            <div className="p-4 text-center text-[#64748b] text-sm">
+            <div key="sessions-empty" className="p-4 text-center text-[#64748b] text-sm">
               {searchQuery ? '没有找到匹配的对话' : '暂无对话'}
             </div>
           ) : (
