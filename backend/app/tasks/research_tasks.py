@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -20,17 +21,29 @@ logger = logging.getLogger(__name__)
 
 
 def run_async(coro):
-    """在同步上下文中运行异步函数"""
-    try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        # 如果已有运行中的事件循环，创建新的
+    """在同步上下文中运行异步函数，确保在新线程中使用新的事件循环"""
+    result = None
+    exception = None
+
+    def run_in_thread():
+        nonlocal result, exception
+        # 在新线程中创建新的事件循环
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(coro)
+            result = loop.run_until_complete(coro)
+        except Exception as e:
+            exception = e
         finally:
             loop.close()
+
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join(timeout=300)  # 5分钟超时
+
+    if exception:
+        raise exception
+    return result
 
 
 @huey.task(retries=3, retry_delay=60)

@@ -115,12 +115,17 @@ export function ChatContainer({ className }: ChatContainerProps) {
     const savedTaskId = safeLocalStorage.getItem('activeResearchTask')
     if (savedTaskId) {
       researchTaskService.getTaskStatus(savedTaskId).then((status) => {
-        if (status.status === 'running' || status.status === 'paused') {
+        // Show progress for pending, running, or paused tasks
+        if (['pending', 'running', 'paused'].includes(status.status)) {
           setActiveResearchTask(status)
-          // Start polling if running
-          if (status.status === 'running') {
+          // Start polling if running or pending
+          if (status.status === 'running' || status.status === 'pending') {
             researchTaskService.startPolling(savedTaskId, (updatedStatus) => {
               setActiveResearchTask(updatedStatus)
+              // Handle clarification pause
+              if (updatedStatus.status === 'paused' && updatedStatus.phase === 'clarify' && updatedStatus.clarificationQuestions) {
+                setClarificationQuestions(updatedStatus.clarificationQuestions)
+              }
             })
           } else if (status.status === 'paused' && status.phase === 'clarify' && status.clarificationQuestions) {
             setClarificationQuestions(status.clarificationQuestions)
