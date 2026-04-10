@@ -1,5 +1,5 @@
 """
-Deep Research Huey Tasks
+Deep Research Tasks
 深度研究异步任务执行
 """
 import asyncio
@@ -11,9 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from app.core.huey_app import huey
 from app.core.config import settings
-from app.core.database import async_session_maker
 from app.models.research import ResearchTask, ResearchTaskStatus, ResearchPhase, ResearchClarification
 from app.services.deer_flow_service import deer_flow_service
 
@@ -46,87 +44,6 @@ def run_async(coro):
     return result
 
 
-@huey.task(retries=3, retry_delay=60)
-def execute_research(task_id: str, query: str, user_id: str, model: Optional[str] = None):
-    """
-    执行深度研究任务
-
-    Args:
-        task_id: 任务 ID
-        query: 用户研究问题
-        user_id: 用户 ID
-        model: 模型名称（可选）
-    """
-    logger.info(f"[Huey Task] Starting research task {task_id} for user {user_id}")
-
-    try:
-        # 更新任务状态为 running
-        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING, started_at=datetime.utcnow()))
-
-        # 执行研究工作流
-        result = run_async(run_research_workflow(task_id, query, user_id, model))
-
-        logger.info(f"[Huey Task] Research task {task_id} completed successfully")
-        return result
-
-    except Exception as e:
-        logger.error(f"[Huey Task] Task {task_id} failed: {e}")
-        run_async(update_task_status(
-            task_id,
-            ResearchTaskStatus.FAILED,
-            error_message=str(e),
-            error_phase="unknown"
-        ))
-        raise
-
-
-@huey.task(retries=2, retry_delay=60)
-def resume_research(task_id: str):
-    """
-    从暂停状态恢复研究任务（用户提交澄清回复后）
-
-    Args:
-        task_id: 任务 ID
-    """
-    logger.info(f"[Huey Task] Resuming research task {task_id}")
-
-    try:
-        # 获取任务信息
-        task_info = run_async(get_task_info(task_id))
-
-        if not task_info:
-            raise ValueError(f"Task {task_id} not found")
-
-        if task_info["status"] != ResearchTaskStatus.PAUSED.value:
-            raise ValueError(f"Task {task_id} is not in paused state")
-
-        # 更新状态为 running
-        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING))
-
-        # 继续执行研究（跳过澄清阶段）
-        result = run_async(run_research_workflow(
-            task_id,
-            task_info["query"],
-            task_info["user_id"],
-            task_info.get("model"),
-            skip_clarification=True,
-            clarified_requirements=task_info.get("clarified_requirements")
-        ))
-
-        logger.info(f"[Huey Task] Research task {task_id} resumed and completed")
-        return result
-
-    except Exception as e:
-        logger.error(f"[Huey Task] Failed to resume task {task_id}: {e}")
-        run_async(update_task_status(
-            task_id,
-            ResearchTaskStatus.FAILED,
-            error_message=str(e),
-            error_phase="clarify"
-        ))
-        raise
-
-
 async def update_task_status(
     task_id: str,
     status: ResearchTaskStatus,
@@ -144,54 +61,48 @@ async def update_task_status(
     citations: Optional[List] = None,
 ):
     """更新任务状态到数据库"""
-    async with async_session_maker() as session:
-        try:
-            # 查询任务
-            from sqlalchemy import select
-            result = await session.execute(
-                select(ResearchTask).where(ResearchTask.id == task_id)
-            )
-            task = result.scalar_one_or_none()
+    try:
+        # 查询任务
+        task = await ResearchTask.find_one(ResearchTask.id == task_id)
 
-            if not task:
-                logger.error(f"Task {task_id} not found in database")
-                return
+        if not task:
+            logger.error(f"Task {task_id} not found in database")
+            return
 
-            # 更新字段
-            task.status = status.value
-            task.updated_at = datetime.utcnow()
+        # 更新字段
+        task.status = status.value
+        task.updated_at = datetime.utcnow()
 
-            if phase:
-                task.phase = phase
-            if phase_status:
-                task.phase_status = phase_status
-            if phase_message:
-                task.phase_message = phase_message
-            if progress:
-                task.progress = progress
-            if sub_tasks:
-                task.sub_tasks = sub_tasks
-            if started_at:
-                task.started_at = started_at
-            if completed_at:
-                task.completed_at = completed_at
-            if error_message:
-                task.error_message = error_message
-            if error_phase:
-                task.error_phase = error_phase
-            if result_url:
-                task.result_url = result_url
-            if report_preview:
-                task.report_preview = report_preview
-            if citations:
-                task.citations = citations
+        if phase:
+            task.phase = phase
+        if phase_status:
+            task.phase_status = phase_status
+        if phase_message:
+            task.phase_message = phase_message
+        if progress:
+            task.progress = progress
+        if sub_tasks:
+            task.sub_tasks = sub_tasks
+        if started_at:
+            task.started_at = started_at
+        if completed_at:
+            task.completed_at = completed_at
+        if error_message:
+            task.error_message = error_message
+        if error_phase:
+            task.error_phase = error_phase
+        if result_url:
+            task.result_url = result_url
+        if report_preview:
+            task.report_preview = report_preview
+        if citations:
+            task.citations = citations
 
-            await session.commit()
-            logger.debug(f"Task {task_id} status updated to {status.value}")
+        await task.save()
+        logger.debug(f"Task {task_id} status updated to {status.value}")
 
-        except Exception as e:
-            logger.error(f"Failed to update task {task_id}: {e}")
-            await session.rollback()
+    except Exception as e:
+        logger.error(f"Failed to update task {task_id}: {e}")
 
 
 async def update_task_progress(
@@ -216,25 +127,20 @@ async def update_task_progress(
 
 async def get_task_info(task_id: str) -> Optional[Dict]:
     """获取任务信息"""
-    async with async_session_maker() as session:
-        from sqlalchemy import select
-        result = await session.execute(
-            select(ResearchTask).where(ResearchTask.id == task_id)
-        )
-        task = result.scalar_one_or_none()
+    task = await ResearchTask.find_one(ResearchTask.id == task_id)
 
-        if task:
-            return {
-                "id": task.id,
-                "user_id": task.user_id,
-                "query": task.query,
-                "status": task.status,
-                "phase": task.phase,
-                "model": task.model,
-                "clarified_requirements": task.clarified_requirements,
-                "progress": task.progress,
-            }
-        return None
+    if task:
+        return {
+            "id": task.id,
+            "user_id": task.user_id,
+            "query": task.query,
+            "status": task.status,
+            "phase": task.phase,
+            "model": task.model,
+            "clarified_requirements": task.clarified_requirements,
+            "progress": task.progress,
+        }
+    return None
 
 
 async def run_research_workflow(
@@ -416,13 +322,11 @@ async def run_research_workflow(
 
 async def save_clarification_questions(task_id: str, questions: List[str]):
     """保存澄清问题到数据库"""
-    async with async_session_maker() as session:
-        clarification = ResearchClarification(
-            task_id=task_id,
-            questions=questions,
-        )
-        session.add(clarification)
-        await session.commit()
+    clarification = ResearchClarification(
+        task_id=task_id,
+        questions=questions,
+    )
+    await clarification.insert()
 
 
 async def save_report_local(report_content: str, task_id: str) -> str:
@@ -442,18 +346,13 @@ async def save_report_local(report_content: str, task_id: str) -> str:
 
 async def increment_task_stats(task_id: str, field: str, value: int = 1):
     """增加任务统计字段"""
-    async with async_session_maker() as session:
-        from sqlalchemy import select, update
-        result = await session.execute(
-            select(ResearchTask).where(ResearchTask.id == task_id)
-        )
-        task = result.scalar_one_or_none()
+    task = await ResearchTask.find_one(ResearchTask.id == task_id)
 
-        if task:
-            if field == "total_iterations":
-                task.total_iterations += value
-            elif field == "total_searches":
-                task.total_searches += value
-            elif field == "token_usage":
-                task.token_usage += value
-            await session.commit()
+    if task:
+        if field == "total_iterations":
+            task.total_iterations += value
+        elif field == "total_searches":
+            task.total_searches += value
+        elif field == "token_usage":
+            task.token_usage += value
+        await task.save()

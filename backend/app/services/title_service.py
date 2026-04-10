@@ -5,10 +5,8 @@ Handles automatic conversation title generation with SSE push
 import asyncio
 import logging
 from typing import AsyncGenerator
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
-from app.core.database import async_session_maker
 from app.models import Session
 from app.services.ai_service import ai_service
 
@@ -40,18 +38,13 @@ async def generate_and_push_title(
 
         logger.info(f"[Title Service] Generated: {new_title}")
 
-        # Update database in new session
-        async with async_session_maker() as db:
-            result = await db.execute(
-                select(Session).where(Session.id == session_id)
-            )
-            session = result.scalar_one_or_none()
-            if session:
-                session.title = new_title
-                from datetime import datetime
-                session.updated_at = datetime.utcnow()
-                await db.commit()
-                logger.info(f"[Title Service] Updated session {session_id[:8]}")
+        # Update database using Beanie
+        session = await Session.find_one(Session.id == session_id)
+        if session:
+            session.title = new_title
+            session.updated_at = datetime.utcnow()
+            await session.save()
+            logger.info(f"[Title Service] Updated session {session_id[:8]}")
 
         # Yield SSE event for frontend
         import json

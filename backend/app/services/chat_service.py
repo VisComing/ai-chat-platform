@@ -9,8 +9,6 @@ import os
 import re
 from datetime import datetime
 from typing import AsyncGenerator, List, Dict, Any
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import Session, Message, File
@@ -22,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_image_urls(
-    db: AsyncSession,
     content: dict,
     user_id: str
 ) -> dict:
@@ -58,12 +55,12 @@ async def resolve_image_urls(
             if file_id_match:
                 file_id = file_id_match.group(1)
 
-                # Query database for file path
+                # Query database for file path using Beanie
                 try:
-                    result = await db.execute(
-                        select(File).where(File.id == file_id, File.user_id == user_id)
+                    file_record = await File.find_one(
+                        File.id == file_id,
+                        File.user_id == user_id
                     )
-                    file_record = result.scalar_one_or_none()
 
                     if file_record and os.path.exists(file_record.path):
                         # Read file and convert to base64
@@ -103,7 +100,6 @@ async def resolve_image_urls(
 
 
 async def stream_chat(
-    db: AsyncSession,
     user_id: str,
     session_id: str | None,
     content: dict,
@@ -115,7 +111,6 @@ async def stream_chat(
     Unified chat stream - supports both normal and agent mode
 
     Args:
-        db: Database session
         user_id: Current user ID
         session_id: Session ID (optional, will create if None)
         content: User message content
@@ -135,8 +130,7 @@ async def stream_chat(
             title="新对话",
             default_model=model,
         )
-        db.add(session)
-        await db.flush()
+        await session.insert()
         session_id = session.id
 
         yield {
@@ -144,20 +138,17 @@ async def stream_chat(
             "data": json.dumps({"sessionId": session_id}, ensure_ascii=False),
         }
     else:
-        result = await db.execute(
-            select(Session).where(Session.id == session_id, Session.user_id == user_id)
+        session = await Session.find_one(
+            Session.id == session_id,
+            Session.user_id == user_id,
         )
-        session = result.scalar_one_or_none()
         if not session:
-            # Create new session if not found
-            logger.warning(f"[Chat] Session {session_id} not found, creating new")
             session = Session(
                 user_id=user_id,
                 title="新对话",
                 default_model=model,
             )
-            db.add(session)
-            await db.flush()
+            await session.insert()
             session_id = session.id
 
             yield {
@@ -172,12 +163,11 @@ async def stream_chat(
         content=content if isinstance(content, dict) else {"type": "text", "text": str(content)},
         status="completed",
     )
-    db.add(user_message)
-    await db.flush()
+    await user_message.insert()
 
     session.message_count += 1
     session.last_message_at = datetime.utcnow()
-    await db.commit()
+    await session.save()
 
     # ========== Create AI Message Placeholder ==========
     ai_message = Message(
@@ -186,25 +176,17 @@ async def stream_chat(
         content={"type": "text", "text": ""},
         status="streaming",
     )
-    db.add(ai_message)
-    await db.flush()
-    await db.commit()  # Commit immediately to persist the message
+    await ai_message.insert()
 
     message_id = ai_message.id
 
     # ========== Get Conversation History ==========
-    # Exclude the placeholder AI message we just created (id == message_id)
-    result = await db.execute(
-        select(Message)
-        .where(Message.session_id == session_id, Message.id != message_id)
-        .order_by(Message.created_at)
-        .limit(20)
-    )
-    history_messages = result.scalars().all()
+    history_messages = await Message.find(
+        Message.session_id == session_id,
+        Message.id != message_id,
+    ).sort("created_at").limit(20).to_list()
 
     logger.info(f"[Chat] History messages count: {len(history_messages)}, excluded message_id: {message_id}")
-    for msg in history_messages:
-        logger.debug(f"[Chat] History msg: id={msg.id}, role={msg.role}, content_preview={str(msg.content)[:50]}")
 
     messages: List[Dict[str, Any]] = []
     for msg in history_messages:
@@ -218,7 +200,7 @@ async def stream_chat(
                 continue
 
         # Resolve image URLs to base64 for AI API consumption
-        msg_content = await resolve_image_urls(db, msg_content, user_id)
+        msg_content = await resolve_image_urls(msg_content, user_id)
 
         messages.append({
             "role": msg.role,
@@ -236,7 +218,6 @@ async def stream_chat(
         if actual_use_agent:
             # Agent mode with search capability
             async for event in _stream_agent_response(
-                db=db,
                 session=session,
                 ai_message=ai_message,
                 messages=messages,
@@ -252,7 +233,6 @@ async def stream_chat(
         else:
             # Normal chat mode
             async for event in _stream_normal_response(
-                db=db,
                 session=session,
                 ai_message=ai_message,
                 messages=messages,
@@ -268,7 +248,6 @@ async def stream_chat(
 
         # ========== Generate Title ==========
         if session.message_count == 2 and session.title == "新对话":
-            # 提取用户消息内容（处理字典格式）
             raw_content = messages[0].get("content", "") if messages else ""
             if isinstance(raw_content, dict):
                 user_msg_text = raw_content.get("text", str(raw_content))
@@ -285,7 +264,7 @@ async def stream_chat(
         logger.error(f"[Chat] Error: {e}")
         ai_message.content = {"type": "text", "text": f"服务错误: {str(e)}"}
         ai_message.status = "error"
-        await db.commit()
+        await ai_message.save()
 
         yield {
             "event": "error",
@@ -298,7 +277,6 @@ async def stream_chat(
 
 
 async def _stream_normal_response(
-    db: AsyncSession,
     session: Session,
     ai_message: Message,
     messages: List[Dict[str, Any]],
@@ -336,7 +314,7 @@ async def _stream_normal_response(
                 # Update DB periodically
                 if len(accumulated_text) % 50 == 0:
                     ai_message.content = {"type": "text", "text": accumulated_text}
-                    await db.commit()
+                    await ai_message.save()
 
                 yield {
                     "event": "text",
@@ -365,7 +343,7 @@ async def _stream_normal_response(
             # Update DB periodically
             if len(accumulated_text) % 50 == 0:
                 ai_message.content = {"type": "text", "text": accumulated_text}
-                await db.commit()
+                await ai_message.save()
 
             yield {
                 "event": "text",
@@ -394,7 +372,8 @@ async def _stream_normal_response(
 
     session.message_count += 1
     session.last_message_at = datetime.utcnow()
-    await db.commit()
+    await ai_message.save()
+    await session.save()
 
     yield {
         "event": "complete",
@@ -410,7 +389,6 @@ async def _stream_normal_response(
 
 
 async def _stream_agent_response(
-    db: AsyncSession,
     session: Session,
     ai_message: Message,
     messages: List[Dict[str, Any]],
@@ -439,7 +417,7 @@ async def _stream_agent_response(
             # Update DB periodically
             if len(accumulated_text) % 50 == 0:
                 ai_message.content = {"type": "text", "text": accumulated_text}
-                await db.commit()
+                await ai_message.save()
 
             yield {
                 "event": "text",
@@ -487,12 +465,13 @@ async def _stream_agent_response(
                 },
                 "duration": time.time() - start_time,
                 "search_used": search_used,
-                "sources": sources,  # 传递 sources 给前端
+                "sources": sources,
                 "citations": citations,
             }
             session.message_count += 1
             session.last_message_at = datetime.utcnow()
-            await db.commit()
+            await ai_message.save()
+            await session.save()
 
             yield {
                 "event": "complete",
@@ -500,7 +479,7 @@ async def _stream_agent_response(
                     "type": "complete",
                     "messageId": message_id,
                     "search_used": search_used,
-                    "sources": sources,  # 传递 sources 给前端
+                    "sources": sources,
                     "citations": citations,
                     "meta": ai_message.meta,
                 }, ensure_ascii=False),
@@ -510,7 +489,7 @@ async def _stream_agent_response(
             error_msg = event_data.get("content", "Unknown error")
             ai_message.content = {"type": "text", "text": f"Agent错误: {error_msg}"}
             ai_message.status = "error"
-            await db.commit()
+            await ai_message.save()
 
             yield {
                 "event": "error",

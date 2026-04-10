@@ -10,8 +10,6 @@ import logging
 import time
 from datetime import datetime
 from typing import AsyncGenerator, Dict, List, Optional, Any
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Session, Message, ChatTask
 from app.services.ai_service import ai_service
@@ -46,7 +44,6 @@ class ChatTaskManager:
 
     async def create_task(
         self,
-        db: AsyncSession,
         user_id: str,
         session_id: str,
         message_id: str,
@@ -58,9 +55,7 @@ class ChatTaskManager:
             user_id=user_id,
             status="pending",
         )
-        db.add(task)
-        await db.flush()
-        await db.refresh(task)
+        await task.insert()
 
         # 初始化事件队列
         self._event_queues[task.id] = []
@@ -109,7 +104,6 @@ class ChatTaskManager:
 
     async def start_execution(
         self,
-        db: AsyncSession,
         task: ChatTask,
         session: Session,
         ai_message: Message,
@@ -124,12 +118,11 @@ class ChatTaskManager:
         不阻塞调用者，任务在后台运行。
         """
         task.status = "running"
-        await db.commit()
+        await task.save()
 
         # 创建后台任务
         async_task = asyncio.create_task(
             self._execute_chat(
-                db=db,
                 task=task,
                 session=session,
                 ai_message=ai_message,
@@ -150,7 +143,6 @@ class ChatTaskManager:
 
     async def _execute_chat(
         self,
-        db: AsyncSession,
         task: ChatTask,
         session: Session,
         ai_message: Message,
@@ -171,7 +163,6 @@ class ChatTaskManager:
         try:
             if use_agent:
                 async for event in self._stream_agent_response(
-                    db=db,
                     task=task,
                     session=session,
                     ai_message=ai_message,
@@ -183,7 +174,6 @@ class ChatTaskManager:
                         accumulated_text = event["accumulated_text"]
             else:
                 async for event in self._stream_normal_response(
-                    db=db,
                     task=task,
                     session=session,
                     ai_message=ai_message,
@@ -212,23 +202,24 @@ class ChatTaskManager:
             # 任务完成
             task.status = "completed"
             task.completed_at = datetime.utcnow()
-            await db.commit()
+            await task.save()
 
         except asyncio.CancelledError:
             logger.info(f"[ChatTask] Task {task.id} was cancelled")
             task.status = "cancelled"
             task.completed_at = datetime.utcnow()
-            await db.commit()
+            await task.save()
 
         except Exception as e:
             logger.error(f"[ChatTask] Task {task.id} failed: {e}")
             task.status = "failed"
             task.error_message = str(e)
             task.completed_at = datetime.utcnow()
+            await task.save()
 
             ai_message.content = {"type": "text", "text": f"服务错误: {str(e)}"}
             ai_message.status = "error"
-            await db.commit()
+            await ai_message.save()
 
             await self.broadcast(task.id, {
                 "event": "error",
@@ -241,7 +232,6 @@ class ChatTaskManager:
 
     async def _stream_normal_response(
         self,
-        db: AsyncSession,
         task: ChatTask,
         session: Session,
         ai_message: Message,
@@ -279,7 +269,7 @@ class ChatTaskManager:
                     # 定期更新数据库
                     if len(accumulated_text) % 50 == 0:
                         ai_message.content = {"type": "text", "text": accumulated_text}
-                        await db.commit()
+                        await ai_message.save()
 
                     event = {
                         "event": "text",
@@ -313,7 +303,7 @@ class ChatTaskManager:
 
                 if len(accumulated_text) % 50 == 0:
                     ai_message.content = {"type": "text", "text": accumulated_text}
-                    await db.commit()
+                    await ai_message.save()
 
                 event = {
                     "event": "text",
@@ -339,10 +329,11 @@ class ChatTaskManager:
         }
         if accumulated_thinking:
             ai_message.meta["thinking"] = accumulated_thinking
+        await ai_message.save()
 
         session.message_count += 1
         session.last_message_at = datetime.utcnow()
-        await db.commit()
+        await session.save()
 
         event = {
             "event": "complete",
@@ -359,7 +350,6 @@ class ChatTaskManager:
 
     async def _stream_agent_response(
         self,
-        db: AsyncSession,
         task: ChatTask,
         session: Session,
         ai_message: Message,
@@ -384,7 +374,7 @@ class ChatTaskManager:
 
                 if len(accumulated_text) % 50 == 0:
                     ai_message.content = {"type": "text", "text": accumulated_text}
-                    await db.commit()
+                    await ai_message.save()
 
                 broadcast_event = {
                     "event": "text",
@@ -441,9 +431,11 @@ class ChatTaskManager:
                     "sources": sources,
                     "citations": citations,
                 }
+                await ai_message.save()
+
                 session.message_count += 1
                 session.last_message_at = datetime.utcnow()
-                await db.commit()
+                await session.save()
 
                 broadcast_event = {
                     "event": "complete",
@@ -463,7 +455,7 @@ class ChatTaskManager:
                 error_msg = event_data.get("content", "Unknown error")
                 ai_message.content = {"type": "text", "text": f"Agent错误: {error_msg}"}
                 ai_message.status = "error"
-                await db.commit()
+                await ai_message.save()
 
                 broadcast_event = {
                     "event": "error",
@@ -484,7 +476,7 @@ class ChatTaskManager:
             del self._running_tasks[task_id]
         logger.info(f"[ChatTask] Task {task_id} removed from running tasks")
 
-    async def cancel_task(self, db: AsyncSession, task_id: str) -> bool:
+    async def cancel_task(self, task_id: str) -> bool:
         """
         取消任务
 
@@ -498,29 +490,22 @@ class ChatTaskManager:
             return True
 
         # 更新数据库状态
-        result = await db.execute(
-            select(ChatTask).where(ChatTask.id == task_id)
-        )
-        task = result.scalar_one_or_none()
+        task = await ChatTask.find_one(ChatTask.id == task_id)
         if task and task.status in ["pending", "running"]:
             task.status = "cancelled"
             task.completed_at = datetime.utcnow()
-            await db.commit()
+            await task.save()
             logger.info(f"[ChatTask] Marked task {task_id} as cancelled")
             return True
 
         return False
 
-    async def get_task_status(self, db: AsyncSession, task_id: str) -> Optional[ChatTask]:
+    async def get_task_status(self, task_id: str) -> Optional[ChatTask]:
         """获取任务状态"""
-        result = await db.execute(
-            select(ChatTask).where(ChatTask.id == task_id)
-        )
-        return result.scalar_one_or_none()
+        return await ChatTask.find_one(ChatTask.id == task_id)
 
     async def get_running_task_for_session(
         self,
-        db: AsyncSession,
         session_id: str,
         user_id: str,
     ) -> Optional[ChatTask]:
@@ -529,18 +514,14 @@ class ChatTaskManager:
 
         用于刷新页面后恢复订阅。
         """
-        result = await db.execute(
-            select(ChatTask).where(
-                and_(
-                    ChatTask.session_id == session_id,
-                    ChatTask.user_id == user_id,
-                    ChatTask.status == "running",
-                )
-            ).order_by(ChatTask.created_at.desc())
-        )
-        return result.scalar_one_or_none()
+        # Use find().sort().first_or_none() instead of find_one().sort()
+        return await ChatTask.find(
+            ChatTask.session_id == session_id,
+            ChatTask.user_id == user_id,
+            ChatTask.status == "running",
+        ).sort("-created_at").first_or_none()
 
-    async def cleanup_completed_tasks(self, db: AsyncSession, max_age_hours: int = 24):
+    async def cleanup_completed_tasks(self, max_age_hours: int = 24):
         """
         清理已完成的旧任务
 
@@ -549,23 +530,17 @@ class ChatTaskManager:
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
 
-        result = await db.execute(
-            select(ChatTask).where(
-                and_(
-                    ChatTask.status.in_(["completed", "failed", "cancelled"]),
-                    ChatTask.completed_at < cutoff,
-                )
-            )
-        )
-        old_tasks = result.scalars().all()
+        # Use proper Beanie $in operator syntax
+        old_tasks = await ChatTask.find(
+            {"status": {"$in": ["completed", "failed", "cancelled"]}, "completed_at": {"$lt": cutoff}}
+        ).to_list()
 
         for task in old_tasks:
-            await db.delete(task)
+            await task.delete()
             # 清理事件队列
             if task.id in self._event_queues:
                 del self._event_queues[task.id]
 
-        await db.commit()
         logger.info(f"[ChatTask] Cleaned up {len(old_tasks)} old tasks")
 
 

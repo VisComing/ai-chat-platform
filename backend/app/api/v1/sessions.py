@@ -1,10 +1,6 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
-from sqlalchemy.sql.functions import coalesce
-from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models import Session, Message
 from app.schemas import (
@@ -26,40 +22,32 @@ async def list_sessions(
     pinned: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """List user's sessions"""
-    # Build query
-    query = select(Session).where(Session.user_id == user_id)
-    count_query = select(func.count()).select_from(Session).where(Session.user_id == user_id)
+    # Build query conditions
+    conditions = [Session.user_id == user_id]
 
     # Filters
     if not archived:
-        query = query.where(Session.archived == False)
-        count_query = count_query.where(Session.archived == False)
+        conditions.append(Session.archived == False)
 
     if pinned is not None:
-        query = query.where(Session.pinned == pinned)
-        count_query = count_query.where(Session.pinned == pinned)
+        conditions.append(Session.pinned == pinned)
 
     if search:
-        # Escape special SQL characters to prevent injection
-        escaped_search = search.replace("%", r"\%").replace("_", r"\_")
-        query = query.where(Session.title.contains(escaped_search))
-        count_query = count_query.where(Session.title.contains(escaped_search))
+        # MongoDB regex search for title
+        conditions.append(Session.title.match(search))
 
     # Count total
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = await Session.find(*conditions).count()
 
     # Get paginated results
-    # Use coalesce to fallback to created_at when updated_at is NULL
-    # This ensures newly created sessions (with NULL updated_at) appear at the top
-    query = query.order_by(desc(Session.pinned), desc(coalesce(Session.updated_at, Session.created_at)))
-    query = query.offset((page - 1) * limit).limit(limit)
-    
-    result = await db.execute(query)
-    sessions = result.scalars().all()
+    # Sort: pinned first, then by updated_at (fallback to created_at)
+    # MongoDB doesn't have coalesce, so we use aggregation or sort by updated_at descending
+    # Since updated_at is null for new sessions, we need to handle this
+    sessions = await Session.find(*conditions).sort(
+        [("pinned", -1), ("updated_at", -1), ("created_at", -1)]
+    ).skip((page - 1) * limit).limit(limit).to_list()
 
     return ApiResponse(
         success=True,
@@ -77,7 +65,6 @@ async def list_sessions(
 async def create_session(
     request: SessionCreate,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Create a new session"""
     session = Session(
@@ -86,9 +73,7 @@ async def create_session(
         system_prompt=request.systemPrompt,
         default_model=request.defaultModel,
     )
-    db.add(session)
-    await db.commit()
-    await db.refresh(session)
+    await session.insert()
 
     return ApiResponse(
         success=True,
@@ -100,13 +85,12 @@ async def create_session(
 async def get_session(
     session_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get session by ID"""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(
@@ -125,13 +109,12 @@ async def update_session(
     session_id: str,
     request: SessionUpdate,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Update session"""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(
@@ -150,8 +133,7 @@ async def update_session(
         session.pinned = request.pinned
 
     session.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(session)
+    await session.save()
 
     return ApiResponse(
         success=True,
@@ -163,13 +145,12 @@ async def update_session(
 async def delete_session(
     session_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Delete session"""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(
@@ -177,8 +158,7 @@ async def delete_session(
             detail="会话不存在",
         )
 
-    await db.delete(session)
-    await db.commit()
+    await session.delete()
 
     return ApiResponse(success=True, message="会话已删除")
 
@@ -187,13 +167,12 @@ async def delete_session(
 async def pin_session(
     session_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Pin/unpin session"""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(
@@ -203,7 +182,7 @@ async def pin_session(
 
     session.pinned = not session.pinned
     session.updated_at = datetime.utcnow()
-    await db.commit()
+    await session.save()
 
     return ApiResponse(success=True, data={"pinned": session.pinned})
 
@@ -212,13 +191,12 @@ async def pin_session(
 async def archive_session(
     session_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Archive/unarchive session"""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(
@@ -228,7 +206,7 @@ async def archive_session(
 
     session.archived = not session.archived
     session.updated_at = datetime.utcnow()
-    await db.commit()
+    await session.save()
 
     return ApiResponse(success=True, data={"archived": session.archived})
 
@@ -239,14 +217,14 @@ async def get_session_messages(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get session messages"""
     # Verify session belongs to user
-    result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == user_id)
+    session = await Session.find_one(
+        Session.id == session_id,
+        Session.user_id == user_id,
     )
-    if not result.scalar_one_or_none():
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="会话不存在",
@@ -254,31 +232,22 @@ async def get_session_messages(
 
     # Mark any interrupted streaming messages as cancelled
     # This happens when user refreshes during streaming
-    result = await db.execute(
-        select(Message).where(
-            Message.session_id == session_id,
-            Message.status == "streaming"
-        )
-    )
-    streaming_messages = result.scalars().all()
+    streaming_messages = await Message.find(
+        Message.session_id == session_id,
+        Message.status == "streaming"
+    ).to_list()
+
     for msg in streaming_messages:
         msg.status = "cancelled"
         # Add a note if the message is empty
         if not msg.content.get("text"):
             msg.content = {"type": "text", "text": "[回复被中断]"}
-    if streaming_messages:
-        await db.commit()
+        await msg.save()
 
     # Get messages
-    query = (
-        select(Message)
-        .where(Message.session_id == session_id)
-        .order_by(Message.created_at)
-    )
-    query = query.offset((page - 1) * limit).limit(limit)
-
-    result = await db.execute(query)
-    messages = result.scalars().all()
+    messages = await Message.find(
+        Message.session_id == session_id
+    ).sort("created_at").skip((page - 1) * limit).limit(limit).to_list()
 
     return ApiResponse(
         success=True,

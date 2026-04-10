@@ -1,8 +1,5 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.core.database import get_db
 from app.core.security import (
     get_password_hash,
     verify_password,
@@ -27,20 +24,19 @@ router = APIRouter()
 @router.post("/register")
 async def register(
     request: RegisterRequest,
-    db: AsyncSession = Depends(get_db),
 ):
     """Register a new user"""
     # Check if email already exists
-    result = await db.execute(select(User).where(User.email == request.email))
-    if result.scalar_one_or_none():
+    existing_user = await User.find_one(User.email == request.email)
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="邮箱已被注册",
         )
 
     # Check if username already exists
-    result = await db.execute(select(User).where(User.username == request.username))
-    if result.scalar_one_or_none():
+    existing_user = await User.find_one(User.username == request.username)
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="用户名已被使用",
@@ -52,14 +48,11 @@ async def register(
         username=request.username,
         password_hash=get_password_hash(request.password),
     )
-    db.add(user)
-    await db.flush()
+    await user.insert()
 
     # Create user settings
     settings = UserSettings(user_id=user.id)
-    db.add(settings)
-    await db.commit()
-    await db.refresh(user)
+    await settings.insert()
 
     # Create tokens
     access_token = create_access_token(data={"sub": user.id})
@@ -78,7 +71,6 @@ async def register(
 @router.post("/login")
 async def login(
     request: LoginRequest,
-    db: AsyncSession = Depends(get_db),
 ):
     """Login user - supports username or email"""
     # Validate if account is email format using proper regex
@@ -87,12 +79,10 @@ async def login(
 
     if is_email:
         # Find user by email
-        result = await db.execute(select(User).where(User.email == request.account))
+        user = await User.find_one(User.email == request.account)
     else:
         # Find user by username
-        result = await db.execute(select(User).where(User.username == request.account))
-
-    user = result.scalar_one_or_none()
+        user = await User.find_one(User.username == request.account)
 
     if not user or not verify_password(request.password, user.password_hash):
         raise HTTPException(
@@ -123,7 +113,6 @@ async def login(
 @router.post("/refresh")
 async def refresh_token(
     request: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db),
 ):
     """Refresh access token"""
     payload = decode_token(request.refreshToken)
@@ -135,8 +124,7 @@ async def refresh_token(
         )
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await User.find_one(User.id == user_id)
 
     if not user or not user.is_active:
         raise HTTPException(
@@ -161,11 +149,9 @@ async def refresh_token(
 @router.get("/me")
 async def get_current_user(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get current user"""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await User.find_one(User.id == user_id)
 
     if not user:
         raise HTTPException(

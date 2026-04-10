@@ -1,73 +1,54 @@
+"""
+Tests for API Endpoints - MongoDB/Beanie Version
+"""
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 from app.main import app
-from app.core.database import Base, get_db
-from app.models import User
+from app.core.database import init_db, close_db
+from app.models import User, Session
 
 
-# Test database URL
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
-
-
-@pytest_asyncio.fixture
-async def test_db():
-    """Create test database"""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    async_session = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    
-    yield async_session
-    
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    
-    await engine.dispose()
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db():
+    """Setup database connection - runs for each test function"""
+    await init_db()
+    yield
+    await close_db()
 
 
 @pytest_asyncio.fixture
-async def client(test_db):
+async def client():
     """Create test client"""
-    async def override_get_db():
-        async with test_db() as session:
-            yield session
-    
-    app.dependency_overrides[get_db] = override_get_db
-    
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test"
     ) as client:
         yield client
-    
-    app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
-async def auth_headers(client: AsyncClient, test_db):
+async def auth_headers(client: AsyncClient):
     """Create authenticated user and return headers"""
-    # Register user
+    # Clean up any existing test user first
+    existing = await User.find_one(User.email == "test_fixture@example.com")
+    if existing:
+        await existing.delete()
+
+    # Register user with unique username for this fixture
     response = await client.post(
         "/api/v1/auth/register",
         json={
-            "email": "test@example.com",
-            "username": "testuser",
+            "email": "test_fixture@example.com",
+            "username": "test_fixture_user",
             "password": "testpassword123",
         },
     )
-    
+
     assert response.status_code == 200
     data = response.json()
-    
-    # Updated to use new response format (camelCase, nested in data)
+
     return {"Authorization": f"Bearer {data['data']['accessToken']}"}
 
 
@@ -77,15 +58,20 @@ class TestAuthAPI:
     @pytest.mark.asyncio
     async def test_register_success(self, client: AsyncClient):
         """Should register new user"""
+        # Clean up first
+        existing = await User.find_one(User.email == "newuser@example.com")
+        if existing:
+            await existing.delete()
+
         response = await client.post(
             "/api/v1/auth/register",
             json={
                 "email": "newuser@example.com",
-                "username": "newuser",
+                "username": "newuser_register",
                 "password": "password123",
             },
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -99,12 +85,12 @@ class TestAuthAPI:
         response = await client.post(
             "/api/v1/auth/register",
             json={
-                "email": "test@example.com",
+                "email": "test_fixture@example.com",
                 "username": "anotheruser",
                 "password": "password123",
             },
         )
-        
+
         assert response.status_code == 400
 
     @pytest.mark.asyncio
@@ -113,7 +99,7 @@ class TestAuthAPI:
         response = await client.post(
             "/api/v1/auth/login",
             json={
-                "account": "test@example.com",
+                "account": "test_fixture@example.com",
                 "password": "testpassword123",
             },
         )
@@ -129,7 +115,7 @@ class TestAuthAPI:
         response = await client.post(
             "/api/v1/auth/login",
             json={
-                "account": "test@example.com",
+                "account": "test_fixture@example.com",
                 "password": "wrongpassword",
             },
         )
@@ -143,11 +129,11 @@ class TestAuthAPI:
             "/api/v1/auth/me",
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["data"]["email"] == "test@example.com"
+        assert data["data"]["email"] == "test_fixture@example.com"
 
 
 class TestSessionsAPI:
@@ -161,7 +147,7 @@ class TestSessionsAPI:
             json={"title": "Test Session"},
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -177,12 +163,12 @@ class TestSessionsAPI:
             json={"title": "Test Session"},
             headers=auth_headers,
         )
-        
+
         response = await client.get(
             "/api/v1/sessions",
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -198,13 +184,13 @@ class TestSessionsAPI:
             headers=auth_headers,
         )
         session_id = create_response.json()["data"]["id"]
-        
+
         # Get session
         response = await client.get(
             f"/api/v1/sessions/{session_id}",
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -220,15 +206,15 @@ class TestSessionsAPI:
             headers=auth_headers,
         )
         session_id = create_response.json()["data"]["id"]
-        
+
         # Delete session
         response = await client.delete(
             f"/api/v1/sessions/{session_id}",
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
-        
+
         # Verify deleted
         get_response = await client.get(
             f"/api/v1/sessions/{session_id}",
@@ -250,7 +236,7 @@ class TestChatAPI:
             headers=auth_headers,
         )
         session_id = session_response.json()["data"]["id"]
-        
+
         response = await client.post(
             "/api/v1/chat/stream",
             json={
@@ -259,7 +245,7 @@ class TestChatAPI:
             },
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 200
         # SSE response should contain event stream
         content_type = response.headers.get("content-type", "")

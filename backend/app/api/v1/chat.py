@@ -5,13 +5,11 @@ Chat API Endpoints
 """
 import json
 import logging
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.schemas import ChatRequest, ApiResponse
 from app.models import Session, Message, ChatTask
@@ -27,7 +25,6 @@ logger = logging.getLogger(__name__)
 async def chat_stream(
     request: ChatRequest,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     统一聊天流端点
@@ -53,7 +50,6 @@ async def chat_stream(
     async def event_generator():
         try:
             async for event in _create_and_stream_chat(
-                db=db,
                 user_id=user_id,
                 session_id=request.sessionId,
                 content=content,
@@ -76,7 +72,6 @@ async def chat_stream(
 async def subscribe_to_task(
     task_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     订阅正在运行的任务
@@ -84,13 +79,10 @@ async def subscribe_to_task(
     用于刷新页面后恢复 SSE 流。
     """
     # 验证任务所有权
-    result = await db.execute(
-        select(ChatTask).where(
-            ChatTask.id == task_id,
-            ChatTask.user_id == user_id,
-        )
+    task = await ChatTask.find_one(
+        ChatTask.id == task_id,
+        ChatTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         async def error_generator():
@@ -159,19 +151,15 @@ async def subscribe_to_task(
 async def cancel_task(
     task_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     取消正在运行的任务
     """
     # 验证任务所有权
-    result = await db.execute(
-        select(ChatTask).where(
-            ChatTask.id == task_id,
-            ChatTask.user_id == user_id,
-        )
+    task = await ChatTask.find_one(
+        ChatTask.id == task_id,
+        ChatTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         return ApiResponse(
@@ -179,7 +167,7 @@ async def cancel_task(
             message="任务不存在",
         )
 
-    cancelled = await chat_task_manager.cancel_task(db, task_id)
+    cancelled = await chat_task_manager.cancel_task(task_id)
 
     if cancelled:
         return ApiResponse(
@@ -197,7 +185,6 @@ async def cancel_task(
 async def get_running_task(
     session_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     获取会话中正在运行的任务
@@ -205,7 +192,6 @@ async def get_running_task(
     前端刷新后调用此接口检查是否有正在进行的生成任务。
     """
     task = await chat_task_manager.get_running_task_for_session(
-        db=db,
         session_id=session_id,
         user_id=user_id,
     )
@@ -235,12 +221,7 @@ async def get_supported_models():
     }
 
 
-# 导入 asyncio 用于 subscribe 端点
-import asyncio
-
-
 async def _create_and_stream_chat(
-    db: AsyncSession,
     user_id: str,
     session_id: str | None,
     content: dict,
@@ -263,8 +244,7 @@ async def _create_and_stream_chat(
             title="新对话",
             default_model=model,
         )
-        db.add(session)
-        await db.flush()
+        await session.insert()
         session_id = session.id
 
         yield {
@@ -272,18 +252,17 @@ async def _create_and_stream_chat(
             "data": json.dumps({"sessionId": session_id}, ensure_ascii=False),
         }
     else:
-        result = await db.execute(
-            select(Session).where(Session.id == session_id, Session.user_id == user_id)
+        session = await Session.find_one(
+            Session.id == session_id,
+            Session.user_id == user_id,
         )
-        session = result.scalar_one_or_none()
         if not session:
             session = Session(
                 user_id=user_id,
                 title="新对话",
                 default_model=model,
             )
-            db.add(session)
-            await db.flush()
+            await session.insert()
             session_id = session.id
 
             yield {
@@ -298,12 +277,11 @@ async def _create_and_stream_chat(
         content=content if isinstance(content, dict) else {"type": "text", "text": str(content)},
         status="completed",
     )
-    db.add(user_message)
-    await db.flush()
+    await user_message.insert()
 
     session.message_count += 1
     session.last_message_at = datetime.utcnow()
-    await db.commit()
+    await session.save()
 
     # ========== 创建 AI 消息占位符 ==========
     ai_message = Message(
@@ -312,15 +290,12 @@ async def _create_and_stream_chat(
         content={"type": "text", "text": ""},
         status="streaming",
     )
-    db.add(ai_message)
-    await db.flush()
-    await db.commit()
+    await ai_message.insert()
 
     message_id = ai_message.id
 
     # ========== 创建任务 ==========
     task = await chat_task_manager.create_task(
-        db=db,
         user_id=user_id,
         session_id=session_id,
         message_id=message_id,
@@ -333,13 +308,10 @@ async def _create_and_stream_chat(
     }
 
     # ========== 获取历史消息 ==========
-    result = await db.execute(
-        select(Message)
-        .where(Message.session_id == session_id, Message.id != message_id)
-        .order_by(Message.created_at)
-        .limit(20)
-    )
-    history_messages = result.scalars().all()
+    history_messages = await Message.find(
+        Message.session_id == session_id,
+        Message.id != message_id,
+    ).sort("created_at").limit(20).to_list()
 
     messages = []
     for msg in history_messages:
@@ -357,7 +329,6 @@ async def _create_and_stream_chat(
 
     # ========== 启动后台任务并订阅 ==========
     await chat_task_manager.start_execution(
-        db=db,
         task=task,
         session=session,
         ai_message=ai_message,
@@ -391,7 +362,6 @@ async def _create_and_stream_chat(
 async def agent_stream(
     request: ChatRequest,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Agent 聊天流（已弃用，请使用 /stream 并设置 useAgent=true）
@@ -399,4 +369,4 @@ async def agent_stream(
     保留此端点以保持向后兼容。
     """
     request.useAgent = True
-    return await chat_stream(request, user_id, db)
+    return await chat_stream(request, user_id)

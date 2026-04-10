@@ -15,9 +15,11 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api/v1"
 
-    # Database
-    database_url: str = "sqlite+aiosqlite:///./chat.db"
-    database_echo: bool = False
+    # Database - MongoDB
+    mongodb_url: str = "mongodb://localhost:27017"  # MongoDB Atlas URL in production
+    mongodb_db_name: str = "ai_chat_platform"
+    mongodb_max_pool_size: int = 10
+    mongodb_min_pool_size: int = 1
 
     # Redis (optional, for future use)
     redis_url: str = "redis://localhost:6379/0"

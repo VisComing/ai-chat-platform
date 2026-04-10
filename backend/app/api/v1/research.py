@@ -6,12 +6,10 @@ Deep Research API Endpoint
 import json
 import logging
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 from typing import List, Optional
 
-from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.services.deer_flow_service import deer_flow_service
 

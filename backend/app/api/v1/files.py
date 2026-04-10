@@ -4,9 +4,6 @@ import io
 import imghdr
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.core.database import get_db
 from app.core.security import get_current_user_id, get_current_user_id_optional, decode_token
 from app.core.config import settings
 from app.models import File as FileModel
@@ -56,7 +53,6 @@ async def upload_file(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Upload a file"""
     # Validate file size
@@ -94,9 +90,7 @@ async def upload_file(
         size=len(content),
         mime_type=file.content_type,
     )
-    db.add(file_record)
-    await db.commit()
-    await db.refresh(file_record)
+    await file_record.insert()
 
     return FileUploadResponse(
         id=file_record.id,
@@ -112,7 +106,6 @@ async def upload_image(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Upload an image file with strict validation.
@@ -172,9 +165,7 @@ async def upload_image(
         size=len(content),
         mime_type=file.content_type,
     )
-    db.add(file_record)
-    await db.commit()
-    await db.refresh(file_record)
+    await file_record.insert()
 
     # 7. Create a short-lived token for image access (7 days)
     from app.core.security import create_access_token
@@ -198,13 +189,12 @@ async def upload_image(
 async def get_file(
     file_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get file information"""
-    result = await db.execute(
-        select(FileModel).where(FileModel.id == file_id, FileModel.user_id == user_id)
+    file_record = await FileModel.find_one(
+        FileModel.id == file_id,
+        FileModel.user_id == user_id,
     )
-    file_record = result.scalar_one_or_none()
 
     if not file_record:
         raise HTTPException(
@@ -219,13 +209,12 @@ async def get_file(
 async def download_file(
     file_id: str,
     user_id: str = Depends(get_user_id_from_query_or_header),
-    db: AsyncSession = Depends(get_db),
 ):
     """Download file. Supports both authenticated (header) and token-based (query) access."""
-    result = await db.execute(
-        select(FileModel).where(FileModel.id == file_id, FileModel.user_id == user_id)
+    file_record = await FileModel.find_one(
+        FileModel.id == file_id,
+        FileModel.user_id == user_id,
     )
-    file_record = result.scalar_one_or_none()
 
     if not file_record:
         raise HTTPException(
@@ -251,13 +240,12 @@ async def download_file(
 async def delete_file(
     file_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Delete file"""
-    result = await db.execute(
-        select(FileModel).where(FileModel.id == file_id, FileModel.user_id == user_id)
+    file_record = await FileModel.find_one(
+        FileModel.id == file_id,
+        FileModel.user_id == user_id,
     )
-    file_record = result.scalar_one_or_none()
 
     if not file_record:
         raise HTTPException(
@@ -270,7 +258,6 @@ async def delete_file(
         os.remove(file_record.path)
 
     # Delete database record
-    await db.delete(file_record)
-    await db.commit()
+    await file_record.delete()
 
     return {"success": True, "message": "文件已删除"}
