@@ -6,11 +6,8 @@ import asyncio
 import logging
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 
-from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.core.config import settings
 from app.models.research import (
@@ -82,7 +79,6 @@ async def run_research_background(task_id: str, query: str, user_id: str, model:
 async def create_research_task(
     request: ResearchTaskCreate,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     创建深度研究任务
@@ -90,29 +86,6 @@ async def create_research_task(
     任务将在后台异步执行，用户可以关闭页面后通过任务 ID 查询进度。
     """
     logger.info(f"[Research API] User {user_id} creating research task: {request.query[:50]}...")
-
-    # 配额检查已禁用
-    # # 1. 检查用户配额
-    # quota = await get_or_create_quota(db, user_id)
-    #
-    # # 重置每日配额（如果需要）
-    # today = date.today()
-    # if quota.last_reset_date.date() != today:
-    #     quota.daily_used = 0
-    #     quota.last_reset_date = datetime.utcnow()
-    #     await db.commit()
-    #
-    # # 检查是否超过每日限制
-    # if quota.daily_used >= quota.daily_limit:
-    #     raise HTTPException(
-    #         status_code=429,
-    #         detail={
-    #             "code": "QUOTA_EXCEEDED",
-    #             "message": f"今日深度研究次数已达上限（{quota.daily_limit}次），请明天再试",
-    #             "daily_limit": quota.daily_limit,
-    #             "daily_used": quota.daily_used,
-    #         }
-    #     )
 
     # 2. 创建任务记录
     task = ResearchTask(
@@ -123,14 +96,7 @@ async def create_research_task(
         status=ResearchTaskStatus.PENDING.value,
         phase=ResearchPhase.CLARIFY.value,
     )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-
-    # 3. 增加配额使用次数 - 已禁用
-    # quota.daily_used += 1
-    # quota.total_tasks += 1
-    # await db.commit()
+    await task.insert()
 
     # 4. 启动后台异步任务
     task_coro = run_research_background(
@@ -164,7 +130,6 @@ async def create_research_task(
 async def get_task_status(
     task_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     查询任务状态和进度
@@ -174,15 +139,10 @@ async def get_task_status(
     logger.debug(f"[Research API] User {user_id} querying task {task_id}")
 
     # 查询任务
-    result = await db.execute(
-        select(ResearchTask).where(
-            and_(
-                ResearchTask.id == task_id,
-                ResearchTask.user_id == user_id,
-            )
-        )
+    task = await ResearchTask.find_one(
+        ResearchTask.id == task_id,
+        ResearchTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(
@@ -225,10 +185,9 @@ async def get_task_status(
     # 获取澄清问题（如果任务处于 paused 状态）
     clarification_questions = None
     if task.status == ResearchTaskStatus.PAUSED.value:
-        result = await db.execute(
-            select(ResearchClarification).where(ResearchClarification.task_id == task_id)
+        clarification = await ResearchClarification.find_one(
+            ResearchClarification.task_id == task_id
         )
-        clarification = result.scalar_one_or_none()
         if clarification and clarification.questions:
             clarification_questions = clarification.questions
 
@@ -255,7 +214,6 @@ async def submit_clarification(
     task_id: str,
     request: ClarificationRequest,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     提交澄清回复
@@ -265,15 +223,10 @@ async def submit_clarification(
     logger.info(f"[Research API] User {user_id} submitting clarification for task {task_id}")
 
     # 查询任务
-    result = await db.execute(
-        select(ResearchTask).where(
-            and_(
-                ResearchTask.id == task_id,
-                ResearchTask.user_id == user_id,
-            )
-        )
+    task = await ResearchTask.find_one(
+        ResearchTask.id == task_id,
+        ResearchTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(
@@ -288,10 +241,9 @@ async def submit_clarification(
         )
 
     # 查询澄清问题记录
-    result = await db.execute(
-        select(ResearchClarification).where(ResearchClarification.task_id == task_id)
+    clarification = await ResearchClarification.find_one(
+        ResearchClarification.task_id == task_id
     )
-    clarification = result.scalar_one_or_none()
 
     if not clarification:
         raise HTTPException(
@@ -302,12 +254,12 @@ async def submit_clarification(
     # 保存用户回复
     clarification.answers = request.answers
     clarification.answered_at = datetime.utcnow()
-    await db.commit()
+    await clarification.save()
 
     # 构建澄清后的需求
     clarified_requirements = "\n".join([f"用户澄清：{a}" for a in request.answers])
     task.clarified_requirements = clarified_requirements
-    await db.commit()
+    await task.save()
 
     # 启动后台任务继续执行
     async def resume_research_background():
@@ -359,7 +311,6 @@ async def submit_clarification(
 async def cancel_task(
     task_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     取消任务
@@ -369,15 +320,10 @@ async def cancel_task(
     logger.info(f"[Research API] User {user_id} cancelling task {task_id}")
 
     # 查询任务
-    result = await db.execute(
-        select(ResearchTask).where(
-            and_(
-                ResearchTask.id == task_id,
-                ResearchTask.user_id == user_id,
-            )
-        )
+    task = await ResearchTask.find_one(
+        ResearchTask.id == task_id,
+        ResearchTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(
@@ -394,7 +340,7 @@ async def cancel_task(
     # 更新任务状态为已取消
     task.status = ResearchTaskStatus.CANCELLED.value
     task.completed_at = datetime.utcnow()
-    await db.commit()
+    await task.save()
 
     logger.info(f"[Research API] Task {task_id} cancelled")
 
@@ -412,7 +358,6 @@ async def cancel_task(
 async def get_task_result(
     task_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     获取任务结果
@@ -422,15 +367,10 @@ async def get_task_result(
     logger.info(f"[Research API] User {user_id} getting result for task {task_id}")
 
     # 查询任务
-    result = await db.execute(
-        select(ResearchTask).where(
-            and_(
-                ResearchTask.id == task_id,
-                ResearchTask.user_id == user_id,
-            )
-        )
+    task = await ResearchTask.find_one(
+        ResearchTask.id == task_id,
+        ResearchTask.user_id == user_id,
     )
-    task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(
@@ -476,7 +416,6 @@ async def list_user_tasks(
     limit: int = 10,
     offset: int = 0,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     获取用户的任务列表
@@ -486,19 +425,15 @@ async def list_user_tasks(
     logger.debug(f"[Research API] User {user_id} listing tasks, status={status}")
 
     # 构建查询条件
-    conditions = [ResearchTask.user_id == user_id]
+    query = ResearchTask.find(ResearchTask.user_id == user_id)
     if status:
-        conditions.append(ResearchTask.status == status)
+        query = ResearchTask.find(
+            ResearchTask.user_id == user_id,
+            ResearchTask.status == status,
+        )
 
     # 查询任务列表
-    result = await db.execute(
-        select(ResearchTask)
-        .where(and_(*conditions))
-        .order_by(ResearchTask.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    tasks = result.scalars().all()
+    tasks = await query.sort("-created_at").limit(limit).skip(offset).to_list()
 
     # 构建响应
     task_list = []
@@ -519,21 +454,20 @@ async def list_user_tasks(
 @router.get("/quota", response_model=ApiResponse[UserQuotaStatus])
 async def get_user_quota(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     获取用户配额状态
     """
     logger.debug(f"[Research API] User {user_id} querying quota")
 
-    quota = await get_or_create_quota(db, user_id)
+    quota = await get_or_create_quota(user_id)
 
     # 重置每日配额（如果需要）
     today = date.today()
     if quota.last_reset_date.date() != today:
         quota.daily_used = 0
         quota.last_reset_date = datetime.utcnow()
-        await db.commit()
+        await quota.save()
 
     return ApiResponse(
         success=True,
@@ -546,20 +480,15 @@ async def get_user_quota(
     )
 
 
-async def get_or_create_quota(db: AsyncSession, user_id: str) -> UserResearchQuota:
+async def get_or_create_quota(user_id: str) -> UserResearchQuota:
     """获取或创建用户配额记录"""
-    result = await db.execute(
-        select(UserResearchQuota).where(UserResearchQuota.user_id == user_id)
-    )
-    quota = result.scalar_one_or_none()
+    quota = await UserResearchQuota.find_one(UserResearchQuota.user_id == user_id)
 
     if not quota:
         quota = UserResearchQuota(
             user_id=user_id,
             daily_limit=settings.deep_research_daily_limit,
         )
-        db.add(quota)
-        await db.commit()
-        await db.refresh(quota)
+        await quota.insert()
 
     return quota

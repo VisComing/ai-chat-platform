@@ -4,10 +4,11 @@ uvicorn[standard]==0.30.0
 sse-starlette==2.1.0
 python-multipart==0.0.9
 
-# Database
-sqlalchemy[asyncio]==2.0.35
-asyncpg==0.29.0
-alembic==1.13.3
+# Database - MongoDB
+motor==3.6.0
+beanie==1.28.0
+
+# Database - SQLite (optional, for Huey task queue only)
 aiosqlite==0.20.0
 
 # Task Queue

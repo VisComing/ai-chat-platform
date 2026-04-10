@@ -45,33 +45,37 @@ jobs:
   backend-test:
     name: Backend Test
     runs-on: ubuntu-latest
-    
+
+    env:
+      MONGODB_URL: ${{ secrets.MONGODB_URL }}
+      MONGODB_DB_NAME: ai_chat_platform_test
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install dependencies
         run: |
           cd backend
           pip install -r requirements.txt
           pip install pytest-cov
-      
+
       - name: Run linter
         run: |
           cd backend
           pip install black isort
           black --check .
           isort --check .
-      
+
       - name: Run tests
         run: |
           cd backend
           pytest tests/ -v --cov=app --cov-report=xml
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:

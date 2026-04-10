@@ -2,13 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
 from app.core.config import settings
-from app.core.database import init_db, close_db, async_session_maker
+from app.core.database import init_db, close_db
 from app.core.logging import setup_logging, get_logger
 from app.core.security import get_password_hash
 from app.api.v1 import auth, sessions, chat, users, files, speech, research, research_async
-from app.models import User, ChatTask
+from app.models import User
 
 # Initialize logging
 setup_logging()
@@ -17,22 +16,20 @@ logger = get_logger("app.main")
 
 async def create_test_user():
     """Create test user if not exists"""
-    async with async_session_maker() as db:
-        # Check if test user exists
-        result = await db.execute(select(User).where(User.username == "testuser"))
-        if result.scalar_one_or_none():
-            return  # Already exists
+    # Check if test user exists
+    existing_user = await User.find_one(User.username == "testuser")
+    if existing_user:
+        return  # Already exists
 
-        # Create test user
-        test_user = User(
-            email="testuser@example.com",
-            username="testuser",
-            password_hash=get_password_hash("testpass123"),
-            is_active=True,
-        )
-        db.add(test_user)
-        await db.commit()
-        logger.info("Test user created: testuser / testpass123")
+    # Create test user
+    test_user = User(
+        email="testuser@example.com",
+        username="testuser",
+        password_hash=get_password_hash("testpass123"),
+        is_active=True,
+    )
+    await test_user.insert()
+    logger.info("Test user created: testuser / testpass123")
 
 
 @asynccontextmanager

@@ -1,73 +1,50 @@
 """
-Tests for Deep Research Async Tasks API
+Tests for Deep Research Async Tasks API - MongoDB/Beanie Version
 深度研究异步任务 API 测试
 """
 import pytest
 import pytest_asyncio
-from datetime import datetime, date
+from datetime import datetime
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.main import app
-from app.core.database import Base, get_db
+from app.core.database import init_db, close_db
 from app.models import User
 from app.models.research import ResearchTask, ResearchClarification, UserResearchQuota, ResearchTaskStatus
 
 
-# Test database URL
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_research.db"
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db():
+    """Setup database connection - runs for each test function"""
+    await init_db()
+    yield
+    await close_db()
 
 
 @pytest_asyncio.fixture
-async def test_db():
-    """Create test database"""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async_session = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    yield async_session
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def client(test_db):
+async def client():
     """Create test client"""
-    async def override_get_db():
-        async with test_db() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test"
     ) as client:
         yield client
 
-    app.dependency_overrides.clear()
-
 
 @pytest_asyncio.fixture
-async def auth_headers(client: AsyncClient, test_db):
+async def auth_headers(client: AsyncClient):
     """Create authenticated user and return headers"""
+    # Clean up any existing test user
+    existing = await User.find_one(User.email == "test_research@example.com")
+    if existing:
+        await existing.delete()
+
     # Register user
     response = await client.post(
         "/api/v1/auth/register",
         json={
             "email": "test_research@example.com",
-            "username": "testuser",
+            "username": "test_research_user",
             "password": "testpass123",
         },
     )
@@ -100,25 +77,22 @@ class TestResearchTaskAPI:
         assert data["data"]["status"] == ResearchTaskStatus.PENDING.value
 
     @pytest.mark.asyncio
-    async def test_create_task_quota_exceeded(self, client: AsyncClient, auth_headers, test_db):
+    async def test_create_task_quota_exceeded(self, client: AsyncClient, auth_headers):
         """测试配额超限"""
-        # 先获取用户 ID
-        async with test_db() as db:
-            result = await db.execute(select(User).where(User.username == "testuser"))
-            user = result.scalar_one()
-            user_id = user.id
+        # Get user from database
+        user = await User.find_one(User.username == "test_research_user")
+        user_id = user.id
 
-            # 设置配额为已用完
-            quota = UserResearchQuota(
-                user_id=user_id,
-                daily_limit=5,
-                daily_used=5,
-                last_reset_date=datetime.utcnow()
-            )
-            db.add(quota)
-            await db.commit()
+        # Set quota to exhausted
+        quota = UserResearchQuota(
+            user_id=user_id,
+            daily_limit=5,
+            daily_used=5,
+            last_reset_date=datetime.utcnow()
+        )
+        await quota.insert()
 
-        # 尝试创建任务
+        # Try to create task
         response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -129,10 +103,12 @@ class TestResearchTaskAPI:
         data = response.json()
         assert "QUOTA_EXCEEDED" in data["detail"]["code"]
 
+        await quota.delete()
+
     @pytest.mark.asyncio
     async def test_get_task_status(self, client: AsyncClient, auth_headers):
         """测试获取任务状态"""
-        # 先创建任务
+        # Create task first
         create_response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -140,7 +116,7 @@ class TestResearchTaskAPI:
         )
         task_id = create_response.json()["data"]["taskId"]
 
-        # 查询状态
+        # Query status
         response = await client.get(
             f"/api/v1/research/tasks/{task_id}",
             headers=auth_headers
@@ -166,7 +142,7 @@ class TestResearchTaskAPI:
     @pytest.mark.asyncio
     async def test_cancel_task(self, client: AsyncClient, auth_headers):
         """测试取消任务"""
-        # 创建任务
+        # Create task
         create_response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -174,7 +150,7 @@ class TestResearchTaskAPI:
         )
         task_id = create_response.json()["data"]["taskId"]
 
-        # 取消任务
+        # Cancel task
         response = await client.delete(
             f"/api/v1/research/tasks/{task_id}",
             headers=auth_headers
@@ -187,7 +163,7 @@ class TestResearchTaskAPI:
     @pytest.mark.asyncio
     async def test_list_tasks(self, client: AsyncClient, auth_headers):
         """测试获取任务列表"""
-        # 创建几个任务
+        # Create several tasks
         for i in range(3):
             await client.post(
                 "/api/v1/research/tasks",
@@ -195,7 +171,7 @@ class TestResearchTaskAPI:
                 json={"query": f"测试问题 {i}"}
             )
 
-        # 获取列表
+        # Get list
         response = await client.get(
             "/api/v1/research/tasks?limit=10",
             headers=auth_headers
@@ -228,7 +204,7 @@ class TestClarificationFlow:
     @pytest.mark.asyncio
     async def test_submit_clarification_not_paused(self, client: AsyncClient, auth_headers):
         """测试对非暂停状态的任务提交澄清"""
-        # 创建任务
+        # Create task
         create_response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -236,7 +212,7 @@ class TestClarificationFlow:
         )
         task_id = create_response.json()["data"]["taskId"]
 
-        # 尝试提交澄清（任务不在暂停状态）
+        # Try to submit clarification (task not in paused state)
         response = await client.post(
             f"/api/v1/research/tasks/{task_id}/clarify",
             headers=auth_headers,
@@ -253,7 +229,7 @@ class TestTaskResult:
     @pytest.mark.asyncio
     async def test_get_result_not_completed(self, client: AsyncClient, auth_headers):
         """测试获取未完成任务的结果"""
-        # 创建任务
+        # Create task
         create_response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -261,7 +237,7 @@ class TestTaskResult:
         )
         task_id = create_response.json()["data"]["taskId"]
 
-        # 尝试获取结果（任务未完成）
+        # Try to get result (task not completed)
         response = await client.get(
             f"/api/v1/research/tasks/{task_id}/result",
             headers=auth_headers
@@ -271,9 +247,9 @@ class TestTaskResult:
         assert "TASK_NOT_COMPLETED" in response.json()["detail"]["code"]
 
     @pytest.mark.asyncio
-    async def test_get_result_completed(self, client: AsyncClient, auth_headers, test_db):
+    async def test_get_result_completed(self, client: AsyncClient, auth_headers):
         """测试获取已完成任务的结果"""
-        # 创建任务
+        # Create task
         create_response = await client.post(
             "/api/v1/research/tasks",
             headers=auth_headers,
@@ -281,18 +257,14 @@ class TestTaskResult:
         )
         task_id = create_response.json()["data"]["taskId"]
 
-        # 手动更新任务状态为已完成
-        async with test_db() as db:
-            result = await db.execute(
-                select(ResearchTask).where(ResearchTask.id == task_id)
-            )
-            task = result.scalar_one()
-            task.status = ResearchTaskStatus.COMPLETED.value
-            task.result_url = "research/test/report.md"
-            task.report_preview = "这是报告摘要"
-            await db.commit()
+        # Manually update task status to completed
+        task = await ResearchTask.find_one(ResearchTask.id == task_id)
+        task.status = ResearchTaskStatus.COMPLETED.value
+        task.result_url = "research/test/report.md"
+        task.report_preview = "这是报告摘要"
+        await task.save()
 
-        # 获取结果
+        # Get result
         response = await client.get(
             f"/api/v1/research/tasks/{task_id}/result",
             headers=auth_headers
@@ -308,25 +280,22 @@ class TestQuotaReset:
     """配额重置测试"""
 
     @pytest.mark.asyncio
-    async def test_quota_daily_reset(self, client: AsyncClient, auth_headers, test_db):
+    async def test_quota_daily_reset(self, client: AsyncClient, auth_headers):
         """测试每日配额重置"""
-        # 获取用户 ID
-        async with test_db() as db:
-            result = await db.execute(select(User).where(User.username == "testuser"))
-            user = result.scalar_one()
-            user_id = user.id
+        # Get user ID
+        user = await User.find_one(User.username == "test_research_user")
+        user_id = user.id
 
-            # 设置昨天的重置日期
-            quota = UserResearchQuota(
-                user_id=user_id,
-                daily_limit=5,
-                daily_used=5,
-                last_reset_date=datetime(2020, 1, 1)  # 过去的日期
-            )
-            db.add(quota)
-            await db.commit()
+        # Set yesterday's reset date
+        quota = UserResearchQuota(
+            user_id=user_id,
+            daily_limit=5,
+            daily_used=5,
+            last_reset_date=datetime(2020, 1, 1)  # Past date
+        )
+        await quota.insert()
 
-        # 查询配额（应该自动重置）
+        # Query quota (should auto-reset)
         response = await client.get(
             "/api/v1/research/quota",
             headers=auth_headers
@@ -334,5 +303,5 @@ class TestQuotaReset:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["data"]["dailyUsed"] == 0  # 应该已重置
+        assert data["data"]["dailyUsed"] == 0  # Should have reset
         assert data["data"]["dailyRemaining"] == data["data"]["dailyLimit"]

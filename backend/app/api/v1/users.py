@@ -1,7 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models import User, UserSettings
 from app.schemas import UserResponse, UserUpdate, UserSettingsResponse, UserSettingsUpdate, ApiResponse
@@ -12,11 +9,9 @@ router = APIRouter()
 @router.get("/me")
 async def get_current_user_profile(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get current user profile"""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await User.find_one(User.id == user_id)
 
     if not user:
         raise HTTPException(
@@ -34,11 +29,9 @@ async def get_current_user_profile(
 async def update_current_user(
     request: UserUpdate,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Update current user profile"""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await User.find_one(User.id == user_id)
 
     if not user:
         raise HTTPException(
@@ -51,8 +44,8 @@ async def update_current_user(
     for field, value in update_data.items():
         setattr(user, field, value)
 
-    await db.commit()
-    await db.refresh(user)
+    user.updated_at = __import__('datetime').datetime.utcnow()
+    await user.save()
 
     return ApiResponse(
         success=True,
@@ -63,20 +56,14 @@ async def update_current_user(
 @router.get("/me/settings")
 async def get_current_user_settings(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get current user settings"""
-    result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user_id)
-    )
-    settings = result.scalar_one_or_none()
+    settings = await UserSettings.find_one(UserSettings.user_id == user_id)
 
     if not settings:
         # Create default settings
         settings = UserSettings(user_id=user_id)
-        db.add(settings)
-        await db.commit()
-        await db.refresh(settings)
+        await settings.insert()
 
     return ApiResponse(
         success=True,
@@ -88,17 +75,13 @@ async def get_current_user_settings(
 async def update_current_user_settings(
     request: UserSettingsUpdate,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ):
     """Update current user settings"""
-    result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user_id)
-    )
-    settings = result.scalar_one_or_none()
+    settings = await UserSettings.find_one(UserSettings.user_id == user_id)
 
     if not settings:
         settings = UserSettings(user_id=user_id)
-        db.add(settings)
+        await settings.insert()
 
     # Field mapping from camelCase to snake_case
     field_mapping = {
@@ -116,8 +99,8 @@ async def update_current_user_settings(
         if hasattr(settings, db_field):
             setattr(settings, db_field, value)
 
-    await db.commit()
-    await db.refresh(settings)
+    settings.updated_at = __import__('datetime').datetime.utcnow()
+    await settings.save()
 
     return ApiResponse(
         success=True,
