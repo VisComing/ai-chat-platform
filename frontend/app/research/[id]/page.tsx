@@ -26,6 +26,13 @@ export default function ResearchDetailPage() {
   const { isAuthenticated } = useAuthStore()
   const { selectSession } = useSessionStore()
 
+  // 未认证时跳转
+  React.useEffect(() => {
+    if (!isAuthenticated) {
+      router.push('/login')
+    }
+  }, [isAuthenticated, router])
+
   // 检测屏幕宽度
   useEffect(() => {
     const handleResize = () => {
@@ -125,12 +132,6 @@ export default function ResearchDetailPage() {
   // 选择会话
   const handleSelectSession = (sessionId: string) => {
     router.push(`/chat/${sessionId}`)
-  }
-
-  // 未认证时跳转
-  if (!isAuthenticated) {
-    router.push('/login')
-    return null
   }
 
   const getPhaseTitle = () => {
