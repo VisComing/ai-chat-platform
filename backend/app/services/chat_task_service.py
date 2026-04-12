@@ -160,12 +160,13 @@ class ChatTaskManager:
         all_sources = []
 
         try:
-            # 统一调用 agent_service
+            # 统一调用 agent_service（传递 session_id 用于多轮对话状态）
             async for event in agent_service.chat(
                 messages=messages,
                 model=model,
                 enable_search=enable_search,
                 enable_thinking=enable_thinking,
+                session_id=session.id,
             ):
                 # 检查任务是否被取消
                 if task.status == "cancelled":

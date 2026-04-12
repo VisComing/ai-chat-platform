@@ -1,6 +1,7 @@
 """
 Unified Agent Service
-统一的 AI 服务，整合对话、搜索、深度思考、多模态等能力
+使用 LangGraph create_react_agent 实现的 AI 服务
+整合对话、搜索、深度思考、多模态等能力
 """
 import httpx
 import json
@@ -8,14 +9,14 @@ import logging
 import os
 import base64
 from typing import AsyncGenerator, Dict, Any, List, Optional
-from datetime import datetime
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from contextvars import ContextVar
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
-from typing import TypedDict, Annotated
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.pregel import Pregel
 
 from app.core.config import get_settings
 from app.services.search_service import search_service, SearchResult
@@ -48,6 +49,11 @@ MULTIMODAL_MODELS = [
 # ============================================================================
 # 工具定义
 # ============================================================================
+
+# 使用 ContextVar 传递 request_id，解决并发安全问题
+_request_id_var: ContextVar[str] = ContextVar("request_id")
+# 搜索结果缓存：key = request_id + query（带 TTL 清理）
+_search_results_cache: Dict[str, List[Dict[str, Any]]] = {}
 
 @tool
 async def web_search(query: str, time_range: str = "NoLimit") -> str:
@@ -89,36 +95,20 @@ async def web_search(query: str, time_range: str = "NoLimit") -> str:
         if not results:
             return "未找到相关搜索结果。"
 
+        # 保存搜索结果用于 SSE 事件（使用 request_id 避免并发冲突）
+        request_id = _request_id_var.get("")
+        cache_key = f"{request_id}:{query}"
+        _search_results_cache[cache_key] = [r.to_dict() for r in results]
+
         formatted = search_service.format_results_for_llm(results)
         return formatted
 
+    except httpx.TimeoutException as e:
+        logger.error(f"Search tool timeout: {e}")
+        return "搜索超时，请稍后重试。"
     except Exception as e:
-        logger.error(f"Search tool error: {e}")
+        logger.error(f"Search tool error: {e}", exc_info=True)
         return f"搜索失败: {str(e)}"
-
-
-# ============================================================================
-# Agent 状态定义
-# ============================================================================
-
-class AgentState(TypedDict):
-    """Agent 状态定义"""
-    messages: Annotated[List[Any], add_messages]
-    search_results: Optional[List[Dict[str, str]]]
-    search_query: Optional[str]
-    iteration: int
-    should_continue: bool
-
-
-# ============================================================================
-# 搜索结果模型
-# ============================================================================
-
-class SearchEvent(BaseModel):
-    """搜索事件数据"""
-    query: str
-    results: List[Dict[str, Any]]
-    iteration: int
 
 
 # ============================================================================
@@ -131,21 +121,25 @@ def load_image_as_base64(file_path: str) -> Optional[str]:
     """
     upload_dir = get_settings().upload_dir
 
+    # 安全路径：只检查直接路径和 images 子目录，避免全目录遍历
     possible_paths = [
         file_path,
         os.path.join(upload_dir, file_path.lstrip('/')),
         os.path.join(upload_dir, 'images', file_path.split('/')[-1] if '/' in file_path else file_path),
     ]
 
-    # 搜索用户子目录
-    for root, dirs, files in os.walk(upload_dir):
-        for file in files:
-            if file.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                full_path = os.path.join(root, file)
-                possible_paths.append(full_path)
-
     for path in possible_paths:
         if os.path.exists(path) and os.path.isfile(path):
+            # 安全检查：确保路径在 upload_dir 内
+            try:
+                real_path = os.path.realpath(path)
+                real_upload_dir = os.path.realpath(upload_dir)
+                if not real_path.startswith(real_upload_dir):
+                    logger.warning(f"Path traversal attempt blocked: {file_path}")
+                    continue
+            except Exception:
+                continue
+
             try:
                 with open(path, 'rb') as f:
                     image_data = f.read()
@@ -232,11 +226,17 @@ def convert_multimodal_content(
 # ============================================================================
 
 class AgentService:
-    """统一的 Agent 服务"""
+    """使用 LangGraph create_react_agent 的统一 Agent 服务"""
 
     def __init__(self):
         self.settings = get_settings()
         self.tools = [web_search]
+        # Memory saver 用于保持多轮对话状态
+        self.memory = MemorySaver()
+        # 缓存已创建的 agent（最多 16 个：8 模型 × 2 配置）
+        self._agents: Dict[str, Pregel] = {}
+        # 共享 HTTP 客户端
+        self._http_client: Optional[httpx.AsyncClient] = None
 
     def is_thinking_model(self, model: str) -> bool:
         """判断模型是否支持深度思考"""
@@ -248,21 +248,58 @@ class AgentService:
         model_lower = model.lower()
         return any(m in model_lower for m in MULTIMODAL_MODELS)
 
-    def _get_http_client(self) -> httpx.AsyncClient:
-        """获取配置了代理的 httpx 客户端"""
-        proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
-        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-
-        if proxy or https_proxy:
-            return httpx.AsyncClient(proxy=https_proxy or proxy, timeout=120.0)
+    def _create_http_client(self) -> httpx.AsyncClient:
+        """创建共享 HTTP 客户端"""
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("http_proxy")
+        if proxy:
+            return httpx.AsyncClient(proxy=proxy, timeout=120.0)
         return httpx.AsyncClient(timeout=120.0)
 
-    def _get_system_prompt(self, has_search_results: bool = False) -> str:
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """获取 HTTP 客户端（延迟初始化）"""
+        if self._http_client is None:
+            self._http_client = self._create_http_client()
+        return self._http_client
+
+    def _get_system_prompt(self) -> str:
         """获取系统提示"""
-        base_prompt = "你是一个智能助手，能够帮助用户解答问题。"
-        if has_search_results:
-            base_prompt += "\n\n你已经获取了相关的搜索结果，请基于这些信息回答用户的问题。"
-        return base_prompt
+        return "你是一个智能助手，能够帮助用户解答问题。"
+
+    def _create_llm(self, model: str) -> ChatOpenAI:
+        """创建 LLM 实例"""
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("http_proxy")
+
+        http_client = None
+        if proxy:
+            http_client = httpx.AsyncClient(proxy=proxy, timeout=60.0)
+            logger.info(f"[Agent] Using proxy: {proxy}")
+
+        return ChatOpenAI(
+            model=model,
+            openai_api_key=self.settings.bailian_api_key,
+            openai_api_base=self.settings.bailian_base_url,
+            temperature=self.settings.default_temperature,
+            max_tokens=self.settings.max_tokens,
+            http_async_client=http_client,
+        )
+
+    def _get_agent(self, model: str, enable_search: bool = True) -> Pregel:
+        """获取或创建指定模型的 agent"""
+        cache_key = f"{model}:{enable_search}"
+
+        if cache_key in self._agents:
+            return self._agents[cache_key]
+
+        llm = self._create_llm(model)
+        tools = self.tools if enable_search else []
+        agent = create_react_agent(
+            llm,
+            tools=tools,
+            checkpointer=self.memory,
+        )
+        self._agents[cache_key] = agent
+        logger.info(f"[Agent] Created agent: {model}, search={enable_search}")
+        return agent
 
     async def chat(
         self,
@@ -270,6 +307,7 @@ class AgentService:
         model: Optional[str] = None,
         enable_search: bool = True,
         enable_thinking: bool = False,
+        session_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         统一对话入口
@@ -279,132 +317,194 @@ class AgentService:
             model: 模型名称
             enable_search: 是否启用联网搜索（用户手动控制）
             enable_thinking: 是否启用深度思考（用户手动控制）
+            session_id: 会话 ID，用于保持多轮对话状态
 
         Yields:
             SSE 事件字典，包含 event 和 data
         """
         model = model or self.settings.default_model
+        session_id = session_id or "default"
 
         try:
-            # 转换消息格式
-            converted_messages = self._convert_messages(messages, model)
+            # 统一使用 LangGraph agent 处理对话
+            async for event in self._chat_with_agent(
+                messages=messages,
+                model=model,
+                enable_thinking=enable_thinking,
+                enable_search=enable_search,
+                session_id=session_id,
+            ):
+                yield event
 
-            # 记录迭代次数
-            iteration = 0
-            all_search_results = []
+        except Exception as e:
+            logger.error(f"[Agent] Error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": {
+                    "type": "error",
+                    "content": str(e),
+                }
+            }
 
-            # 如果启用搜索，执行 Agent 循环
-            if enable_search:
-                # 创建带工具的 LLM
-                llm = self._create_llm(model)
-                llm_with_tools = llm.bind_tools(self.tools)
+    async def _chat_with_agent(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        enable_thinking: bool,
+        enable_search: bool,
+        session_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        使用 LangGraph agent 处理对话
 
-                # Agent 循环
-                current_messages = converted_messages.copy()
+        使用 astream_events 获取细粒度的事件，直接流式输出
 
-                while iteration < self.settings.agent_max_iterations:
-                    iteration += 1
-                    logger.info(f"[Agent] Iteration {iteration}")
+        Args:
+            messages: 对话历史
+            model: 模型名称
+            enable_thinking: 是否启用深度思考
+            enable_search: 是否启用搜索工具
+            session_id: 会话 ID
 
-                    # 调用 LLM（带工具）
-                    system_prompt = self._get_system_prompt(has_search_results=len(all_search_results) > 0)
-                    full_messages = [{"role": "system", "content": system_prompt}] + current_messages
+        Yields:
+            SSE 事件字典
+        """
+        import uuid
 
-                    # 使用非流式调用获取响应（判断是否需要工具）
-                    response = await llm_with_tools.ainvoke(full_messages)
+        agent = self._get_agent(model, enable_search=enable_search)
 
-                    # 检查是否有工具调用
-                    if hasattr(response, 'tool_calls') and response.tool_calls:
-                        # 发送 thinking 事件（如果有）
-                        if hasattr(response, 'content') and response.content:
-                            thinking_text = response.content
-                            if thinking_text and thinking_text.strip():
+        # 生成唯一 request_id 用于搜索结果缓存隔离
+        request_id = str(uuid.uuid4())
+        _request_id_var.set(request_id)
+
+        # 记录本次请求的所有缓存 key，用于 finally 清理
+        request_cache_keys: List[str] = []
+
+        # 转换消息格式为 LangChain Message 对象
+        lc_messages = self._convert_to_lc_messages(messages, model)
+
+        # 配置 thread_id 和 recursion_limit（防止无限循环）
+        config = {
+            "configurable": {"thread_id": session_id},
+            "recursion_limit": self.settings.agent_max_iterations + 5,
+        }
+
+        # 记录迭代次数和搜索结果
+        iteration = 0
+        all_search_results: List[Dict[str, Any]] = []
+        current_query = ""
+        # 标记是否已经完成工具调用，进入最终回复阶段
+        final_response_started = False
+
+        try:
+            # 使用 astream_events 获取细粒度事件
+            async for event in agent.astream_events({"messages": lc_messages}, config, version="v2"):
+                event_type = event.get("event", "")
+
+                # on_chain_start: Agent 开始执行
+                if event_type == "on_chain_start":
+                    name = event.get("name", "")
+                    if name == "agent":
+                        iteration += 1
+                        logger.info(f"[Agent] Iteration {iteration} starting, request_id={request_id}")
+
+                # on_tool_start: 工具开始调用
+                elif event_type == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    if tool_name == "web_search":
+                        tool_input = event.get("data", {}).get("input", {})
+                        query = tool_input.get("query", "") if isinstance(tool_input, dict) else ""
+                        current_query = query
+
+                        # 发送 tool_call 事件
+                        yield {
+                            "event": "tool_call",
+                            "data": {
+                                "type": "tool_call",
+                                "tool": "web_search",
+                                "toolName": "web_search",
+                                "query": query,
+                                "toolArgs": tool_input,
+                                "iteration": iteration,
+                            }
+                        }
+
+                # on_tool_end: 工具调用结束
+                elif event_type == "on_tool_end":
+                    tool_name = event.get("name", "")
+                    if tool_name == "web_search":
+                        # 从缓存中获取搜索结果（使用 request_id 避免并发冲突）
+                        cache_key = f"{request_id}:{current_query}"
+                        request_cache_keys.append(cache_key)
+
+                        if cache_key in _search_results_cache:
+                            search_results = _search_results_cache[cache_key]
+                            all_search_results.extend(search_results)
+
+                            # 发送 search_result 事件
+                            sources = self._format_sources(search_results)
+                            yield {
+                                "event": "search_result",
+                                "data": {
+                                    "type": "search_result",
+                                    "query": current_query,
+                                    "sources": sources,
+                                    "iteration": iteration,
+                                }
+                            }
+
+                # on_llm_stream: LLM 流式输出
+                elif event_type == "on_llm_stream":
+                    data = event.get("data", {})
+                    chunk = data.get("chunk")
+
+                    # chunk 是 AIMessageChunk 对象
+                    if chunk:
+                        # 获取内容
+                        content = chunk.content or ""
+
+                        # 尝试从 additional_kwargs 获取 reasoning_content（百炼扩展字段）
+                        reasoning_content = ""
+                        if hasattr(chunk, "additional_kwargs"):
+                            reasoning_content = chunk.additional_kwargs.get("reasoning_content", "")
+
+                        # 通过 tags 区分是 agent 思考还是最终回复
+                        tags = event.get("tags", [])
+
+                        # 处理 reasoning_content（深度思考内容）
+                        if reasoning_content and enable_thinking and reasoning_content.strip():
+                            yield {
+                                "event": "thinking",
+                                "data": {
+                                    "type": "thinking",
+                                    "content": reasoning_content,
+                                    "iteration": iteration,
+                                }
+                            }
+
+                        # 处理正常内容
+                        if content and content.strip():
+                            # 判断是否是最终回复阶段
+                            is_final_response = "agent:llm" in str(tags) or final_response_started
+
+                            if is_final_response:
+                                final_response_started = True
+                                yield {
+                                    "event": "text",
+                                    "data": {
+                                        "type": "text",
+                                        "content": content,
+                                    }
+                                }
+                            else:
                                 yield {
                                     "event": "thinking",
                                     "data": {
                                         "type": "thinking",
-                                        "content": thinking_text,
+                                        "content": content,
                                         "iteration": iteration,
                                     }
                                 }
-
-                        # 处理每个工具调用
-                        for tool_call in response.tool_calls:
-                            if tool_call['name'] == 'web_search':
-                                query = tool_call['args'].get('query', '')
-                                time_range = tool_call['args'].get('time_range', 'NoLimit')
-
-                                # 发送 tool_call 事件
-                                yield {
-                                    "event": "tool_call",
-                                    "data": {
-                                        "type": "tool_call",
-                                        "tool": "web_search",
-                                        "toolName": "web_search",
-                                        "query": query,
-                                        "toolArgs": {"query": query, "time_range": time_range},
-                                        "iteration": iteration,
-                                    }
-                                }
-
-                                # 执行搜索
-                                search_results = await self._execute_search(query, time_range)
-                                all_search_results.extend(search_results)
-
-                                # 发送 search_result 事件
-                                sources = self._format_sources(search_results)
-                                yield {
-                                    "event": "search_result",
-                                    "data": {
-                                        "type": "search_result",
-                                        "query": query,
-                                        "sources": sources,
-                                        "iteration": iteration,
-                                    }
-                                }
-
-                                # 将搜索结果加入消息
-                                result_text = search_service.format_results_for_llm(
-                                    [SearchResult(**r) for r in search_results]
-                                )
-                                current_messages.append({
-                                    "role": "assistant",
-                                    "content": f"搜索结果：{result_text}"
-                                })
-                                current_messages.append({
-                                    "role": "user",
-                                    "content": "请基于以上搜索结果回答问题。"
-                                })
-                    else:
-                        # 没有工具调用，准备生成最终响应
-                        break
-
-                # 最终响应：流式生成
-                # 标记这是最终轮次（iteration = "final"）
-                final_iteration_label = "final"
-                system_prompt = self._get_system_prompt(has_search_results=len(all_search_results) > 0)
-                final_messages = [{"role": "system", "content": system_prompt}] + current_messages
-
-                async for event in self._stream_chat_http(
-                    messages=final_messages,
-                    model=model,
-                    enable_thinking=enable_thinking,
-                    iteration_label=final_iteration_label,
-                ):
-                    yield event
-
-            else:
-                # 不启用搜索，直接流式对话
-                system_prompt = self._get_system_prompt()
-                final_messages = [{"role": "system", "content": system_prompt}] + converted_messages
-
-                async for event in self._stream_chat_http(
-                    messages=final_messages,
-                    model=model,
-                    enable_thinking=enable_thinking,
-                    iteration_label=None,
-                ):
-                    yield event
 
             # 发送完成事件
             yield {
@@ -418,185 +518,47 @@ class AgentService:
                 }
             }
 
-        except Exception as e:
-            logger.error(f"[Agent] Error: {e}")
-            yield {
-                "event": "error",
-                "data": {
-                    "type": "error",
-                    "content": str(e),
-                }
-            }
+        finally:
+            # 确保清理本次请求的所有缓存
+            for key in request_cache_keys:
+                _search_results_cache.pop(key, None)
+            logger.debug(f"[Agent] Cleaned {len(request_cache_keys)} cache keys for request {request_id}")
 
-    async def _stream_chat_http(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        enable_thinking: bool,
-        iteration_label: Optional[str] = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        HTTP 流式调用百炼 API
-
-        直接获取 reasoning_content 和 content
-
-        Args:
-            messages: 消息列表
-            model: 模型名称
-            enable_thinking: 是否启用深度思考
-            iteration_label: 迭代标识（如 "final" 或 None）
-        """
-        headers = {
-            "Authorization": f"Bearer {self.settings.bailian_api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": self.settings.max_tokens,
-            "temperature": self.settings.default_temperature,
-            "stream": True,
-            # 显式设置 enable_thinking 参数控制深度思考
-            # true: 模型在思考后回复（返回 reasoning_content）
-            # false: 模型直接回复（不思考）
-            "enable_thinking": enable_thinking and self.is_thinking_model(model),
-        }
-
-        async with self._get_http_client() as client:
-            try:
-                async with client.stream(
-                    "POST",
-                    f"{self.settings.bailian_base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        yield {
-                            "event": "error",
-                            "data": {
-                                "type": "error",
-                                "content": f"API Error: {response.status_code}",
-                            }
-                        }
-                        return
-
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-
-                            if data_str == "[DONE]":
-                                break
-
-                            try:
-                                data = json.loads(data_str)
-                                if "choices" in data and len(data["choices"]) > 0:
-                                    delta = data["choices"][0].get("delta", {})
-
-                                    # 处理 reasoning_content（深度思考）- 只有启用时才发送
-                                    reasoning_content = delta.get("reasoning_content", "")
-                                    if reasoning_content and enable_thinking:
-                                        yield {
-                                            "event": "thinking",
-                                            "data": {
-                                                "type": "thinking",
-                                                "content": reasoning_content,
-                                                "iteration": iteration_label,
-                                            }
-                                        }
-
-                                    # 处理 content（正常输出）
-                                    content = delta.get("content", "")
-                                    if content:
-                                        yield {
-                                            "event": "text",
-                                            "data": {
-                                                "type": "text",
-                                                "content": content,
-                                            }
-                                        }
-
-                            except json.JSONDecodeError:
-                                continue
-
-            except Exception as e:
-                logger.error(f"[Stream HTTP] Error: {e}")
-                yield {
-                    "event": "error",
-                    "data": {
-                        "type": "error",
-                        "content": str(e),
-                    }
-                }
-
-    def _convert_messages(
+    def _convert_to_lc_messages(
         self,
         messages: List[Dict[str, Any]],
         model: str
-    ) -> List[Dict[str, Any]]:
-        """转换消息格式，处理多模态"""
-        converted = []
+    ) -> List[Any]:
+        """
+        将 API 消息格式转换为 LangChain Message 对象
+
+        Args:
+            messages: API 消息列表
+            model: 模型名称
+
+        Returns:
+            LangChain Message 对象列表
+        """
+        lc_messages = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
 
+            # 处理多模态内容
             if isinstance(content, dict):
                 converted_content = convert_multimodal_content(content, model)
             else:
                 converted_content = content
 
-            converted.append({
-                "role": role,
-                "content": converted_content,
-            })
+            if role == "system":
+                lc_messages.append(SystemMessage(content=converted_content))
+            elif role == "assistant":
+                lc_messages.append(AIMessage(content=converted_content))
+            elif role == "user":
+                lc_messages.append(HumanMessage(content=converted_content))
+            # tool 角色的消息由 LangGraph 自动处理
 
-        return converted
-
-    def _create_llm(self, model: str) -> ChatOpenAI:
-        """创建 LLM 实例"""
-        proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
-        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-
-        http_client = None
-        if proxy or https_proxy:
-            http_client = httpx.AsyncClient(
-                proxy=https_proxy or proxy,
-                timeout=60.0
-            )
-            logger.info(f"[Agent] Using proxy: {https_proxy or proxy}")
-
-        return ChatOpenAI(
-            model=model,
-            openai_api_key=self.settings.bailian_api_key,
-            openai_api_base=self.settings.bailian_base_url,
-            temperature=self.settings.default_temperature,
-            max_tokens=self.settings.max_tokens,
-            http_async_client=http_client,
-        )
-
-    async def _execute_search(
-        self,
-        query: str,
-        time_range: str
-    ) -> List[Dict[str, Any]]:
-        """执行搜索并返回结果"""
-        time_range_map = {
-            "OneDay": search_service.TIME_ONE_DAY,
-            "OneWeek": search_service.TIME_ONE_WEEK,
-            "OneMonth": search_service.TIME_ONE_MONTH,
-            "OneYear": search_service.TIME_ONE_YEAR,
-            "NoLimit": search_service.TIME_NO_LIMIT,
-        }
-        actual_time_range = time_range_map.get(time_range, search_service.TIME_NO_LIMIT)
-
-        results = await search_service.search(
-            query=query,
-            top_k=5,
-            time_range=actual_time_range
-        )
-
-        return [r.to_dict() for r in results]
+        return lc_messages
 
     def _format_sources(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """格式化搜索结果为 sources 格式"""
@@ -648,8 +610,9 @@ class AgentService:
             "stream": False,
         }
 
-        async with self._get_http_client() as client:
-            response = await client.post(
+        try:
+            # 使用共享 HTTP 客户端
+            response = await self._get_http_client().post(
                 f"{self.settings.bailian_base_url}/chat/completions",
                 headers=headers,
                 json=payload,
@@ -670,6 +633,9 @@ class AgentService:
                     title = title[:10]
 
                 return title
+
+        except Exception as e:
+            logger.error(f"[Title] Error: {e}", exc_info=True)
 
         return "新对话"
 
