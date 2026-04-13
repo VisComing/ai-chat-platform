@@ -2,6 +2,8 @@
 Unified Agent Service
 使用 LangGraph create_react_agent 实现的 AI 服务
 整合对话、搜索、深度思考、多模态等能力
+
+使用 traceloop-sdk 自动追踪 LLM 调用。
 """
 import httpx
 import json
@@ -19,10 +21,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.pregel import Pregel
+from traceloop.sdk import Traceloop
+from traceloop.sdk.tracing.tracing import set_workflow_name
 
 from app.core.config import get_settings
 from app.services.search_service import search_service, SearchResult
-from app.services.trace_service import TraceContext, trace_service
 
 logger = logging.getLogger(__name__)
 
@@ -238,9 +241,9 @@ class AgentService:
     def __init__(self):
         self.settings = get_settings()
         self.tools = [web_search]
-        # Memory saver 用于保持多轮对话状态
-        self.memory = MemorySaver()
-        # 缓存已创建的 agent（最多 16 个：8 模型 × 2 配置）
+        # 不再共享 MemorySaver，每个 agent 使用独立的 checkpointer
+        # self.memory = MemorySaver()  # 已移除
+        # 缓存已创建的 agent（每个 agent 有独立的 MemorySaver）
         self._agents: Dict[str, Pregel] = {}
         # 共享 HTTP 客户端
         self._http_client: Optional[httpx.AsyncClient] = None
@@ -272,33 +275,36 @@ class AgentService:
         """获取系统提示"""
         return "你是一个智能助手，能够帮助用户解答问题。"
 
-    def _create_llm(self, model: str) -> ChatOpenAI:
+    def _create_llm(self, model: str, enable_thinking: bool = False) -> ChatOpenAI:
         """
         创建 LLM 实例，根据模型选择对应的 API
 
-        使用 TracingHTTPClient 在 HTTP 层拦截请求和响应。
+        traceloop-sdk 会自动追踪 LangChain 调用，无需自定义 HTTP 客户端。
+
+        Args:
+            model: 模型名称
+            enable_thinking: 是否启用深度思考（百炼 API 特有参数）
+
+        Returns:
+            ChatOpenAI 实例
         """
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("http_proxy")
-
-        # 使用带有 Trace 功能的 HTTP 客户端
-        http_client = trace_service.create_tracing_client(proxy=proxy, timeout=60.0)
-        if proxy:
-            logger.info(f"[Agent] Using proxy: {proxy}")
-
         # 根据模型选择 API 配置
         if model in DEEPSEEK_MODELS:
             api_key = self.settings.deepseek_api_key
             base_url = self.settings.deepseek_base_url
-            api_provider = "deepseek"
             logger.info(f"[Agent] Using DeepSeek API for model: {model}")
         else:
             api_key = self.settings.bailian_api_key
             base_url = self.settings.bailian_base_url
-            api_provider = "bailian"
             logger.info(f"[Agent] Using Bailian API for model: {model}")
 
-        # 记录 API provider 到 settings（用于 trace）
-        self._current_api_provider = api_provider
+        # 构建额外参数（百炼 API 的 enable_thinking 必须显式设置）
+        # extra_body 用于传递非 OpenAI 标准的自定义参数
+        extra_body = {}
+        if enable_thinking and self.is_thinking_model(model):
+            # enable_thinking 是百炼 API 特有参数，通过 extra_body 传递
+            extra_body["enable_thinking"] = True
+            logger.info(f"[Agent] Enable thinking for model: {model}")
 
         return ChatOpenAI(
             model=model,
@@ -306,25 +312,37 @@ class AgentService:
             openai_api_base=base_url,
             temperature=self.settings.default_temperature,
             max_tokens=self.settings.max_tokens,
-            http_async_client=http_client,
+            extra_body=extra_body,
         )
 
-    def _get_agent(self, model: str, enable_search: bool = True) -> Pregel:
-        """获取或创建指定模型的 agent"""
-        cache_key = f"{model}:{enable_search}"
+    def _get_agent(self, model: str, enable_search: bool = True, enable_thinking: bool = False) -> Pregel:
+        """获取或创建指定模型的 agent
+
+        Args:
+            model: 模型名称
+            enable_search: 是否启用搜索工具
+            enable_thinking: 是否启用深度思考（影响 LLM 配置）
+
+        Returns:
+            LangGraph agent 实例（每个 agent 有独立的 MemorySaver）
+        """
+        # 缓存键包含 enable_thinking，避免不同配置共用 agent
+        cache_key = f"{model}:{enable_search}:{enable_thinking}"
 
         if cache_key in self._agents:
             return self._agents[cache_key]
 
-        llm = self._create_llm(model)
+        llm = self._create_llm(model, enable_thinking=enable_thinking)
         tools = self.tools if enable_search else []
+        # 每个 agent 使用独立的 MemorySaver，避免状态混乱
+        memory = MemorySaver()
         agent = create_react_agent(
             llm,
             tools=tools,
-            checkpointer=self.memory,
+            checkpointer=memory,
         )
         self._agents[cache_key] = agent
-        logger.info(f"[Agent] Created agent: {model}, search={enable_search}")
+        logger.info(f"[Agent] Created agent: {model}, search={enable_search}, thinking={enable_thinking}")
         return agent
 
     async def chat(
@@ -334,7 +352,8 @@ class AgentService:
         enable_search: bool = True,
         enable_thinking: bool = False,
         session_id: Optional[str] = None,
-        trace_context: Optional[TraceContext] = None,
+        user_id: Optional[str] = None,
+        message_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         统一对话入口
@@ -345,7 +364,8 @@ class AgentService:
             enable_search: 是否启用联网搜索（用户手动控制）
             enable_thinking: 是否启用深度思考（用户手动控制）
             session_id: 会话 ID，用于保持多轮对话状态
-            trace_context: Trace 上下文，用于记录模型调用追踪
+            user_id: 用户 ID，用于追踪
+            message_id: 消息 ID，用于追踪
 
         Yields:
             SSE 事件字典，包含 event 和 data
@@ -353,20 +373,15 @@ class AgentService:
         model = model or self.settings.default_model
         session_id = session_id or "default"
 
-        # 确定 API provider
-        api_provider = "deepseek" if model in DEEPSEEK_MODELS else "bailian"
-
-        # 设置 trace_context 到 contextvar（HTTP hook 会使用）
-        if trace_context:
-            trace_context.model = model
-            trace_context.api_provider = api_provider
-            trace_context.enable_thinking = enable_thinking
-            trace_context.enable_search = enable_search
-            trace_service.set_trace_context(trace_context)
-            trace_service.update_settings(
-                temperature=self.settings.default_temperature,
-                max_tokens=self.settings.max_tokens,
-            )
+        # 设置 traceloop workflow 和关联属性（用于 MongoDB trace 记录）
+        # 必须先设置 workflow_name，association properties 才会被添加到 span
+        if user_id and session_id and message_id:
+            set_workflow_name("chat_generation")
+            Traceloop.set_association_properties({
+                "user_id": user_id,
+                "session_id": session_id,
+                "message_id": message_id,
+            })
 
         try:
             # 根据是否启用搜索选择不同的处理路径
@@ -399,19 +414,6 @@ class AgentService:
                 }
             }
 
-        finally:
-            # 清除 trace_context
-            if trace_context:
-                trace_service.clear_trace_context()
-            logger.error(f"[Agent] Error: {e}", exc_info=True)
-            yield {
-                "event": "error",
-                "data": {
-                    "type": "error",
-                    "content": str(e),
-                }
-            }
-
     async def _chat_without_tools(
         self,
         messages: List[Dict[str, Any]],
@@ -431,19 +433,19 @@ class AgentService:
         Yields:
             SSE 事件字典
         """
-        llm = self._create_llm(model)
+        llm = self._create_llm(model, enable_thinking=enable_thinking)
         lc_messages = self._convert_to_lc_messages(messages, model)
 
         start_time = time.time()
 
-        logger.info(f"[Agent] Direct LLM call for model: {model}")
+        logger.info(f"[Agent] Direct LLM call for model: {model}, thinking={enable_thinking}")
 
         try:
             # 直接流式调用 LLM
             async for chunk in llm.astream(lc_messages):
                 content = chunk.content or ""
 
-                # 获取 reasoning_content（百炼扩展字段）
+                # 获取 reasoning_content（通过 monkey patch 处理）
                 reasoning_content = ""
                 if hasattr(chunk, "additional_kwargs"):
                     reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
@@ -514,7 +516,7 @@ class AgentService:
         Yields:
             SSE 事件字典
         """
-        agent = self._get_agent(model, enable_search=enable_search)
+        agent = self._get_agent(model, enable_search=enable_search, enable_thinking=enable_thinking)
 
         # 生成唯一 request_id 用于搜索结果缓存隔离
         request_id = str(uuid.uuid4())
@@ -614,6 +616,9 @@ class AgentService:
                         reasoning_content = ""
                         if hasattr(chunk, "additional_kwargs"):
                             reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
+                            # 调试日志：只在有额外字段时打印
+                            if chunk.additional_kwargs and chunk.additional_kwargs.get("reasoning_content"):
+                                logger.info(f"[Agent] Got reasoning_content: {len(reasoning_content)} chars")
 
                         # reasoning_content 作为思考过程
                         if reasoning_content and reasoning_content.strip():

@@ -1,42 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Message, ChatRequest, StreamChunk, IterationData, Source } from '@/types'
+import type { Message, ChatRequest, StreamChunk, Source } from '@/types'
 import { chatService } from '@/services/chatService'
 import { generateId } from '@/lib/utils'
 import { useSessionStore } from './sessionStore'
-
-// Helper function to manage iterations array
-function updateIteration(
-  iterations: IterationData[] | undefined,
-  iterationKey: number | 'final',
-  update: Partial<IterationData>
-): IterationData[] {
-  const iterNum = iterationKey === 'final' ? 'final' : Number(iterationKey)
-
-  // Find existing iteration or create new one
-  const existing = iterations?.find(it => it.iteration === iterNum)
-
-  if (existing) {
-    // Update existing iteration
-    return iterations!.map(it =>
-      it.iteration === iterNum ? { ...it, ...update } : it
-    )
-  } else {
-    // Create new iteration
-    const newIteration: IterationData = {
-      iteration: iterNum,
-      ...update,
-    }
-    return [...(iterations || []), newIteration]
-  }
-}
-
-// Helper to get thinking content for an iteration
-function getIterationThinking(iterations: IterationData[] | undefined, iterationKey: number | 'final'): string {
-  const iterNum = iterationKey === 'final' ? 'final' : Number(iterationKey)
-  const iter = iterations?.find(it => it.iteration === iterNum)
-  return iter?.thinking || ''
-}
 
 interface ChatState {
   // Store messages by sessionId
@@ -77,7 +44,7 @@ export const useChatStore = create<ChatState>()(
       streamingMessageId: null,
       error: null,
       selectedModel: 'qwen3.5-plus',
-      enableSearch: true,  // Default: Web search ENABLED
+      enableSearch: false,  // Default: Web search DISABLED
       enableThinking: false,  // Default: Deep thinking mode DISABLED
       onSessionCreated: undefined,
 
@@ -180,17 +147,24 @@ export const useChatStore = create<ChatState>()(
               }
 
               if (chunk.type === 'text' && state.streamingMessageId) {
+                // 重新获取最新状态，避免 stale snapshot 导致 metadata 被覆盖
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
+
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             content: {
                               type: 'text',
                               text: (msg.content.type === 'text' ? msg.content.text : '') + chunk.content,
                             },
+                            // 保留现有 metadata（包括 search_result 设置的 sources）
+                            metadata: currentMsg?.metadata,
                             updatedAt: new Date(),
                           }
                         : msg
@@ -198,74 +172,52 @@ export const useChatStore = create<ChatState>()(
                   },
                 })
               } else if (chunk.type === 'thinking' && state.streamingMessageId) {
-                // Handle thinking event - use iteration-based structure
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
-                // Get iteration key from chunk (number for agent iteration, 'final' for final response)
-                const iterationKey = chunk.iteration ?? 'final'
-
-                // Get existing thinking for this iteration and append new content
-                const existingThinking = getIterationThinking(existingIterations, iterationKey)
-                const newThinking = chunk.content
-                  ? existingThinking + chunk.content  // Incremental from deep thinking
-                  : (chunk.status || '正在思考...')   // Static status from agent
-
-                // Update iterations array
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  thinking: newThinking,
-                })
+                // Handle thinking event - 直接累加思考内容
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
+                const existingThinking = currentMsg?.metadata?.thinking || ''
+                const newThinking = existingThinking + (chunk.content || '')
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
-                              // Also keep legacy fields for backward compatibility
                               thinking: newThinking,
-                              isDeepThinking: !!chunk.content,
+                              isDeepThinking: true,
                             },
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'tool_call' && state.streamingMessageId) {
-                // Handle tool call event - use iteration-based structure
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
+              } else if (chunk.type === 'tool_call' && get().streamingMessageId) {
+                // Handle tool call event - 直接记录工具调用
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const toolName = chunk.toolName || 'unknown'
-                const queryValue = chunk.toolArgs?.query
-                const iterationKey = chunk.iteration ?? 1
-
-                // Update iterations array with tool call
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  toolCall: {
-                    name: toolName,
-                    args: chunk.toolArgs,
-                  },
-                })
+                const queryValue = chunk.query || chunk.toolArgs?.query || ''
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
-                              // Legacy fields
                               toolCall: {
                                 name: toolName,
                                 args: chunk.toolArgs,
+                                query: queryValue,
                               },
                               searchUsed: toolName === 'web_search',
                               searchQuery: typeof queryValue === 'string' ? queryValue : '',
@@ -275,37 +227,31 @@ export const useChatStore = create<ChatState>()(
                     ),
                   },
                 })
-              } else if (chunk.type === 'search_result' && state.streamingMessageId) {
-                // Handle search result event - use iteration-based structure
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
+              } else if (chunk.type === 'search_result' && get().streamingMessageId) {
+                // Handle search result event - 直接记录搜索结果
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const sources = chunk.sources || []
                 const resultCount = chunk.resultCount || sources.length
-                const iterationKey = chunk.iteration ?? 1
-
-                // Update iterations array with search result
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  searchResult: {
-                    query: chunk.query || '',
-                    sources: sources,
-                    resultCount: resultCount,
-                  },
-                })
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
-                              // Legacy fields
+                              searchResult: {
+                                query: chunk.query || '',
+                                sources: sources,
+                                resultCount: resultCount,
+                              },
                               searchResultCount: resultCount,
                               sources: sources,
+                              searchUsed: true,  // 标记搜索已启用，确保前端立即渲染
                             },
                           }
                         : msg
@@ -355,9 +301,9 @@ export const useChatStore = create<ChatState>()(
                   currentTaskId: null,
                   error: chunk.content,
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...get().messagesBySession,
+                    [sessionId]: (get().messagesBySession[sessionId] || []).map((msg) =>
+                      msg.id === get().streamingMessageId
                         ? {
                             ...msg,
                             status: 'error',
@@ -570,83 +516,79 @@ export const useChatStore = create<ChatState>()(
             runningTask.taskId,
             streamingMessage.id,
             (chunk: StreamChunk) => {
-              const state = get()
-              const sessionMessages = state.messagesBySession[sessionId] || []
+              if (chunk.type === 'text' && get().streamingMessageId) {
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
 
-              if (chunk.type === 'text' && state.streamingMessageId) {
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             content: {
                               type: 'text',
                               text: (msg.content.type === 'text' ? msg.content.text : '') + chunk.content,
                             },
+                            // 保留现有 metadata（包括 search_result 设置的 sources）
+                            metadata: currentMsg?.metadata,
                             updatedAt: new Date(),
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'thinking' && state.streamingMessageId) {
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
-                const iterationKey = chunk.iteration ?? 'final'
-                const existingThinking = getIterationThinking(existingIterations, iterationKey)
-
-                const newThinking = chunk.content
-                  ? existingThinking + chunk.content
-                  : (chunk.status || '正在思考...')
-
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  thinking: newThinking,
-                })
+              } else if (chunk.type === 'thinking' && get().streamingMessageId) {
+                // Handle thinking event - 直接累加思考内容
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
+                const existingThinking = currentMsg?.metadata?.thinking || ''
+                const newThinking = existingThinking + (chunk.content || '')
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
                               thinking: newThinking,
-                              isDeepThinking: !!chunk.content,
+                              isDeepThinking: true,
                             },
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'tool_call' && state.streamingMessageId) {
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
+              } else if (chunk.type === 'tool_call' && get().streamingMessageId) {
+                // Handle tool call event - 直接记录工具调用
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const toolName = chunk.toolName || 'unknown'
-                const queryValue = chunk.toolArgs?.query
-                const iterationKey = chunk.iteration ?? 1
-
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  toolCall: { name: toolName, args: chunk.toolArgs },
-                })
+                const queryValue = chunk.query || chunk.toolArgs?.query || ''
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
-                              toolCall: { name: toolName, args: chunk.toolArgs },
+                              toolCall: {
+                                name: toolName,
+                                args: chunk.toolArgs,
+                                query: queryValue,
+                              },
                               searchUsed: toolName === 'web_search',
                               searchQuery: typeof queryValue === 'string' ? queryValue : '',
                             },
@@ -655,32 +597,31 @@ export const useChatStore = create<ChatState>()(
                     ),
                   },
                 })
-              } else if (chunk.type === 'search_result' && state.streamingMessageId) {
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
-                const existingIterations = currentMsg?.metadata?.iterations || []
-
+              } else if (chunk.type === 'search_result' && get().streamingMessageId) {
+                // Handle search result event - 直接记录搜索结果
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const sources = chunk.sources || []
-                const iterationKey = chunk.iteration ?? 1
-
-                const updatedIterations = updateIteration(existingIterations, iterationKey, {
-                  searchResult: {
-                    query: chunk.query || '',
-                    sources: sources,
-                    resultCount: sources.length,
-                  },
-                })
+                const resultCount = chunk.resultCount || sources.length
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              iterations: updatedIterations,
+                              searchResult: {
+                                query: chunk.query || '',
+                                sources: sources,
+                                resultCount: resultCount,
+                              },
+                              searchResultCount: resultCount,
                               sources: sources,
+                              searchUsed: true,  // 标记搜索已启用，确保前端立即渲染
                             },
                           }
                         : msg
@@ -716,15 +657,16 @@ export const useChatStore = create<ChatState>()(
                   },
                 })
               } else if (chunk.type === 'error') {
+                const currentState = get()
                 set({
                   isLoading: false,
                   streamingMessageId: null,
                   currentTaskId: null,
                   error: chunk.content,
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: (currentState.messagesBySession[sessionId] || []).map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? { ...msg, status: 'error', content: { type: 'text', text: chunk.content || '发生错误' } }
                         : msg
                     ),
