@@ -89,7 +89,7 @@ ai-chat-platform/
 │   │   │   ├── chat_task_service.py # 聊天任务管理
 │   │   │   └ search_service.py    # 联网搜索服务
 │   ├── tests/                # 测试文件
-│   └ requirements.txt        # Python依赖
+│   └── pyproject.toml        # Python依赖配置 (uv)
 │
 ├── docs/                     # 文档
 │
@@ -116,10 +116,11 @@ npm run dev  # http://localhost:3000
 ```
 
 ### 后端启动
+后端使用 uv 管理依赖
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload  # http://localhost:8000
+uv sync                    # 安装依赖
+uv run uvicorn app.main:app --reload  # http://localhost:8000
 ```
 
 ## 代码风格约定

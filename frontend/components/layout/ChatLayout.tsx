@@ -10,35 +10,20 @@ import { toast } from '@/components/ui'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
-// 预认证：在组件挂载前同步读取 localStorage token
-function getStoredToken(): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const stored = localStorage.getItem('auth-storage')
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      return parsed?.state?.accessToken || null
-    }
-  } catch {}
-  return null
-}
-
-// 骨架屏组件
-function SkeletonLayout({ sidebarOpen }: { sidebarOpen: boolean }) {
+// 骨架屏组件 - 服务端和客户端渲染一致
+function SkeletonLayout() {
   return (
     <div className="h-screen flex bg-white dark:bg-secondary-900">
-      {/* Sidebar skeleton */}
-      <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-secondary-50 dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700`}>
-        {sidebarOpen && (
-          <div className="p-4 space-y-4">
-            <div className="h-8 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
-            <div className="space-y-2">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-12 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
-              ))}
-            </div>
+      {/* Sidebar skeleton - 固定宽度，避免 hydration 不匹配 */}
+      <div className="w-64 bg-secondary-50 dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700">
+        <div className="p-4 space-y-4">
+          <div className="h-8 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+          <div className="space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-12 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+            ))}
           </div>
-        )}
+        </div>
       </div>
       {/* Main content skeleton */}
       <div className="flex-1 flex flex-col">
@@ -53,27 +38,43 @@ function SkeletonLayout({ sidebarOpen }: { sidebarOpen: boolean }) {
   )
 }
 
+// 全屏 loading 组件 - 服务端和客户端渲染一致
+function FullScreenLoading() {
+  return (
+    <div className="h-screen flex items-center justify-center bg-white dark:bg-secondary-900">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-secondary-600 dark:text-secondary-400">正在初始化...</p>
+      </div>
+    </div>
+  )
+}
+
 export function ChatLayout() {
   const router = useRouter()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true) // 默认打开，避免 hydration 不匹配
 
-  // 预认证：同步读取 localStorage，如果有 token 则先显示骨架
-  const hasStoredToken = useRef(getStoredToken() !== null)
-  // 如果有缓存 token，立即显示骨架；否则显示全屏 loading
+  // 初始化状态 - 客户端首次渲染后再检查 localStorage
   const [isInitializing, setIsInitializing] = useState(true)
+  const [hasStoredToken, setHasStoredToken] = useState(false)
 
-  // 检测屏幕宽度，桌面端自动展开侧边栏
+  // 客户端首次渲染后检查 localStorage 和屏幕宽度
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        setSidebarOpen(true)
-      } else {
-        setSidebarOpen(false)
+    // 检查是否有缓存的 token
+    try {
+      const stored = localStorage.getItem('auth-storage')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed?.state?.accessToken) {
+          setHasStoredToken(true)
+        }
       }
+    } catch {}
+
+    // 检测屏幕宽度
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false)
     }
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
   }, [])
   const currentSession = useCurrentSession()
   const { createSession, selectSession, sessions, init: initSessions } = useSessionStore()
@@ -99,7 +100,15 @@ export function ChatLayout() {
   useEffect(() => {
     const init = async () => {
       try {
-        const storedToken = getStoredToken()
+        // 从 localStorage 读取 token
+        let storedToken: string | null = null
+        try {
+          const stored = localStorage.getItem('auth-storage')
+          if (stored) {
+            const parsed = JSON.parse(stored)
+            storedToken = parsed?.state?.accessToken || null
+          }
+        } catch {}
 
         if (storedToken) {
           // 有缓存 token：并行执行认证验证和会话加载
@@ -220,21 +229,14 @@ export function ChatLayout() {
     }
   }, [])
 
-  // 如果有缓存 token 且正在初始化，显示骨架屏（方案 A）
-  if (isInitializing && hasStoredToken.current) {
-    return <SkeletonLayout sidebarOpen={sidebarOpen} />
+  // 如果有缓存 token 且正在初始化，显示骨架屏
+  if (isInitializing && hasStoredToken) {
+    return <SkeletonLayout />
   }
 
   // 无缓存 token 时显示全屏 loading
   if (isInitializing) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-white dark:bg-secondary-900">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-secondary-600 dark:text-secondary-400">正在初始化...</p>
-        </div>
-      </div>
-    )
+    return <FullScreenLoading />
   }
 
   // Redirect to login if not authenticated

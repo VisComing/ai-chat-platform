@@ -13,7 +13,6 @@ from typing import AsyncGenerator, Dict, List, Optional, Any
 
 from app.models import Session, Message, ChatTask
 from app.services.agent_service import agent_service
-from app.services.trace_service import TraceContext
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -155,13 +154,6 @@ class ChatTaskManager:
 
         统一调用 agent_service.chat
         """
-        # 创建 TraceContext 用于记录模型调用追踪
-        trace_context = TraceContext(
-            user_id=task.user_id,
-            session_id=session.id,
-            message_id=ai_message.id,
-        )
-
         accumulated_text = ""
         accumulated_thinking = ""
         start_time = time.time()
@@ -170,14 +162,15 @@ class ChatTaskManager:
         search_result_data = None  # 收集搜索结果数据
 
         try:
-            # 统一调用 agent_service（传递 session_id 用于多轮对话状态，传递 trace_context 用于追踪）
+            # 统一调用 agent_service（传递 session_id 用于多轮对话状态，传递 user_id/message_id 用于追踪）
             async for event in agent_service.chat(
                 messages=messages,
                 model=model,
                 enable_search=enable_search,
                 enable_thinking=enable_thinking,
                 session_id=session.id,
-                trace_context=trace_context,
+                user_id=task.user_id,
+                message_id=ai_message.id,
             ):
                 # 检查任务是否被取消
                 if task.status == "cancelled":
