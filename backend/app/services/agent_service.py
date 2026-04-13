@@ -340,18 +340,124 @@ class AgentService:
         session_id = session_id or "default"
 
         try:
-            # 统一使用 LangGraph agent 处理对话
-            async for event in self._chat_with_agent(
-                messages=messages,
-                model=model,
-                enable_thinking=enable_thinking,
-                enable_search=enable_search,
-                session_id=session_id,
-            ):
-                yield event
+            # 根据是否启用搜索选择不同的处理路径
+            if enable_search:
+                # 使用 Agent（带搜索工具）
+                async for event in self._chat_with_agent(
+                    messages=messages,
+                    model=model,
+                    enable_thinking=enable_thinking,
+                    enable_search=enable_search,
+                    session_id=session_id,
+                ):
+                    yield event
+            else:
+                # 直接调用 LLM（不带工具，避免空 tools 数组错误）
+                async for event in self._chat_without_tools(
+                    messages=messages,
+                    model=model,
+                    enable_thinking=enable_thinking,
+                ):
+                    yield event
 
         except Exception as e:
             logger.error(f"[Agent] Error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": {
+                    "type": "error",
+                    "content": str(e),
+                }
+            }
+
+    async def _chat_without_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        enable_thinking: bool,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        直接调用 LLM（不使用 Agent/工具）
+
+        用于 enable_search=False 的情况，避免空 tools 数组导致的 API 错误。
+
+        Args:
+            messages: 对话历史
+            model: 模型名称
+            enable_thinking: 是否启用深度思考
+
+        Yields:
+            SSE 事件字典
+        """
+        import time
+
+        llm = self._create_llm(model)
+        lc_messages = self._convert_to_lc_messages(messages, model)
+
+        start_time = time.time()
+        accumulated_text = ""
+
+        logger.info(f"[Agent] Direct LLM call for model: {model}")
+
+        try:
+            # 直接流式调用 LLM
+            async for chunk in llm.astream(lc_messages):
+                content = chunk.content or ""
+
+                # 获取 reasoning_content（百炼扩展字段）
+                reasoning_content = ""
+                if hasattr(chunk, "additional_kwargs"):
+                    reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
+
+                # 处理 reasoning_content
+                if reasoning_content and reasoning_content.strip():
+                    if enable_thinking:
+                        # 深度思考模式：作为思考过程
+                        yield {
+                            "event": "thinking",
+                            "data": {
+                                "type": "thinking",
+                                "content": reasoning_content,
+                                "iteration": 1,
+                            }
+                        }
+                    else:
+                        # 非深度思考模式：作为最终回复（百炼返回的 reasoning_content 实际是回复内容）
+                        accumulated_text += reasoning_content
+                        yield {
+                            "event": "text",
+                            "data": {
+                                "type": "text",
+                                "content": reasoning_content,
+                            }
+                        }
+
+                # 处理正常 content
+                if content and content.strip():
+                    accumulated_text += content
+                    yield {
+                        "event": "text",
+                        "data": {
+                            "type": "text",
+                            "content": content,
+                        }
+                    }
+
+            # 发送完成事件
+            yield {
+                "event": "complete",
+                "data": {
+                    "type": "complete",
+                    "search_used": False,
+                    "sources": [],
+                    "citations": [],
+                    "iterations": 0,
+                    "duration": time.time() - start_time,
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"[Agent] Direct LLM error: {e}", exc_info=True)
             yield {
                 "event": "error",
                 "data": {
@@ -480,27 +586,51 @@ class AgentService:
                         # 尝试从 additional_kwargs 获取 reasoning_content（百炼扩展字段）
                         reasoning_content = ""
                         if hasattr(chunk, "additional_kwargs"):
-                            reasoning_content = chunk.additional_kwargs.get("reasoning_content", "")
+                            reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
 
                         # 通过 tags 区分是 agent 思考还是最终回复
                         tags = event.get("tags", [])
 
-                        # 处理 reasoning_content（深度思考内容）
-                        if reasoning_content and enable_thinking and reasoning_content.strip():
-                            yield {
-                                "event": "thinking",
-                                "data": {
-                                    "type": "thinking",
-                                    "content": reasoning_content,
-                                    "iteration": iteration,
+                        # 判断是否是最终回复阶段
+                        is_final_response = "agent:llm" in str(tags) or final_response_started
+
+                        # 处理 reasoning_content
+                        # 情况1: 启用深度思考时，reasoning_content 是思考过程
+                        # 情况2: 未启用深度思考且 content 为空时，reasoning_content 作为最终回复
+                        if reasoning_content and reasoning_content.strip():
+                            if enable_thinking:
+                                # 深度思考模式：作为思考过程发送
+                                yield {
+                                    "event": "thinking",
+                                    "data": {
+                                        "type": "thinking",
+                                        "content": reasoning_content,
+                                        "iteration": iteration,
+                                    }
                                 }
-                            }
+                            elif is_final_response and not content.strip():
+                                # 非深度思考模式且 content 为空：reasoning_content 作为最终回复
+                                final_response_started = True
+                                yield {
+                                    "event": "text",
+                                    "data": {
+                                        "type": "text",
+                                        "content": reasoning_content,
+                                    }
+                                }
+                            else:
+                                # 其他情况：作为思考过程发送
+                                yield {
+                                    "event": "thinking",
+                                    "data": {
+                                        "type": "thinking",
+                                        "content": reasoning_content,
+                                        "iteration": iteration,
+                                    }
+                                }
 
                         # 处理正常内容
                         if content and content.strip():
-                            # 判断是否是最终回复阶段
-                            is_final_response = "agent:llm" in str(tags) or final_response_started
-
                             if is_final_response:
                                 final_response_started = True
                                 yield {
