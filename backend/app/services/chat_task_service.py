@@ -13,6 +13,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Any
 
 from app.models import Session, Message, ChatTask
 from app.services.agent_service import agent_service
+from app.services.trace_service import TraceContext
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -154,19 +155,29 @@ class ChatTaskManager:
 
         统一调用 agent_service.chat
         """
+        # 创建 TraceContext 用于记录模型调用追踪
+        trace_context = TraceContext(
+            user_id=task.user_id,
+            session_id=session.id,
+            message_id=ai_message.id,
+        )
+
         accumulated_text = ""
         accumulated_thinking = ""
         start_time = time.time()
         all_sources = []
+        tool_call_data = None  # 收集工具调用数据
+        search_result_data = None  # 收集搜索结果数据
 
         try:
-            # 统一调用 agent_service（传递 session_id 用于多轮对话状态）
+            # 统一调用 agent_service（传递 session_id 用于多轮对话状态，传递 trace_context 用于追踪）
             async for event in agent_service.chat(
                 messages=messages,
                 model=model,
                 enable_search=enable_search,
                 enable_thinking=enable_thinking,
                 session_id=session.id,
+                trace_context=trace_context,
             ):
                 # 检查任务是否被取消
                 if task.status == "cancelled":
@@ -204,7 +215,6 @@ class ChatTaskManager:
                         "data": json.dumps({
                             "type": "thinking",
                             "content": chunk,
-                            "iteration": event_data.get("iteration"),
                             "messageId": ai_message.id,
                         }, ensure_ascii=False),
                     }
@@ -212,17 +222,23 @@ class ChatTaskManager:
 
                 elif event_type == "tool_call":
                     query = event_data.get("query", "")
-                    iteration = event_data.get("iteration")
+                    tool_name = event_data.get("toolName", "web_search")
+
+                    # 收集工具调用数据
+                    tool_call_data = {
+                        "name": tool_name,
+                        "args": event_data.get("toolArgs", {"query": query}),
+                        "query": query,
+                    }
 
                     broadcast_event = {
                         "event": "tool_call",
                         "data": json.dumps({
                             "type": "tool_call",
                             "tool": event_data.get("tool", "web_search"),
-                            "toolName": event_data.get("toolName", "web_search"),
+                            "toolName": tool_name,
                             "query": query,
                             "toolArgs": event_data.get("toolArgs", {"query": query}),
-                            "iteration": iteration,
                             "messageId": ai_message.id,
                         }, ensure_ascii=False),
                     }
@@ -230,16 +246,23 @@ class ChatTaskManager:
 
                 elif event_type == "search_result":
                     sources = event_data.get("sources", [])
+                    query = event_data.get("query", "")
                     all_sources.extend(sources)
+
+                    # 收集搜索结果数据
+                    search_result_data = {
+                        "query": query,
+                        "sources": sources,
+                        "resultCount": len(sources),
+                    }
 
                     broadcast_event = {
                         "event": "search_result",
                         "data": json.dumps({
                             "type": "search_result",
-                            "query": event_data.get("query", ""),
+                            "query": query,
                             "sources": sources,
                             "resultCount": len(sources),
-                            "iteration": event_data.get("iteration"),
                             "messageId": ai_message.id,
                         }, ensure_ascii=False),
                     }
@@ -266,6 +289,10 @@ class ChatTaskManager:
                     }
                     if accumulated_thinking:
                         ai_message.meta["thinking"] = accumulated_thinking
+                    if tool_call_data:
+                        ai_message.meta["toolCall"] = tool_call_data
+                    if search_result_data:
+                        ai_message.meta["searchResult"] = search_result_data
                     await ai_message.save()
 
                     # 更新会话
@@ -283,7 +310,6 @@ class ChatTaskManager:
                             "sources": sources,
                             "citations": citations,
                             "meta": ai_message.meta,
-                            "iterations": event_data.get("iterations", 0),
                         }, ensure_ascii=False),
                     }
                     await self.broadcast(task.id, broadcast_event)

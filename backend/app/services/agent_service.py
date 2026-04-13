@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import base64
+import time
+import uuid
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from pydantic import BaseModel
 from contextvars import ContextVar
@@ -20,6 +22,7 @@ from langgraph.pregel import Pregel
 
 from app.core.config import get_settings
 from app.services.search_service import search_service, SearchResult
+from app.services.trace_service import TraceContext, trace_service
 
 logger = logging.getLogger(__name__)
 
@@ -270,23 +273,32 @@ class AgentService:
         return "你是一个智能助手，能够帮助用户解答问题。"
 
     def _create_llm(self, model: str) -> ChatOpenAI:
-        """创建 LLM 实例，根据模型选择对应的 API"""
+        """
+        创建 LLM 实例，根据模型选择对应的 API
+
+        使用 TracingHTTPClient 在 HTTP 层拦截请求和响应。
+        """
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("http_proxy")
 
-        http_client = None
+        # 使用带有 Trace 功能的 HTTP 客户端
+        http_client = trace_service.create_tracing_client(proxy=proxy, timeout=60.0)
         if proxy:
-            http_client = httpx.AsyncClient(proxy=proxy, timeout=60.0)
             logger.info(f"[Agent] Using proxy: {proxy}")
 
         # 根据模型选择 API 配置
         if model in DEEPSEEK_MODELS:
             api_key = self.settings.deepseek_api_key
             base_url = self.settings.deepseek_base_url
+            api_provider = "deepseek"
             logger.info(f"[Agent] Using DeepSeek API for model: {model}")
         else:
             api_key = self.settings.bailian_api_key
             base_url = self.settings.bailian_base_url
+            api_provider = "bailian"
             logger.info(f"[Agent] Using Bailian API for model: {model}")
+
+        # 记录 API provider 到 settings（用于 trace）
+        self._current_api_provider = api_provider
 
         return ChatOpenAI(
             model=model,
@@ -322,6 +334,7 @@ class AgentService:
         enable_search: bool = True,
         enable_thinking: bool = False,
         session_id: Optional[str] = None,
+        trace_context: Optional[TraceContext] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         统一对话入口
@@ -332,12 +345,28 @@ class AgentService:
             enable_search: 是否启用联网搜索（用户手动控制）
             enable_thinking: 是否启用深度思考（用户手动控制）
             session_id: 会话 ID，用于保持多轮对话状态
+            trace_context: Trace 上下文，用于记录模型调用追踪
 
         Yields:
             SSE 事件字典，包含 event 和 data
         """
         model = model or self.settings.default_model
         session_id = session_id or "default"
+
+        # 确定 API provider
+        api_provider = "deepseek" if model in DEEPSEEK_MODELS else "bailian"
+
+        # 设置 trace_context 到 contextvar（HTTP hook 会使用）
+        if trace_context:
+            trace_context.model = model
+            trace_context.api_provider = api_provider
+            trace_context.enable_thinking = enable_thinking
+            trace_context.enable_search = enable_search
+            trace_service.set_trace_context(trace_context)
+            trace_service.update_settings(
+                temperature=self.settings.default_temperature,
+                max_tokens=self.settings.max_tokens,
+            )
 
         try:
             # 根据是否启用搜索选择不同的处理路径
@@ -370,6 +399,19 @@ class AgentService:
                 }
             }
 
+        finally:
+            # 清除 trace_context
+            if trace_context:
+                trace_service.clear_trace_context()
+            logger.error(f"[Agent] Error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": {
+                    "type": "error",
+                    "content": str(e),
+                }
+            }
+
     async def _chat_without_tools(
         self,
         messages: List[Dict[str, Any]],
@@ -389,13 +431,10 @@ class AgentService:
         Yields:
             SSE 事件字典
         """
-        import time
-
         llm = self._create_llm(model)
         lc_messages = self._convert_to_lc_messages(messages, model)
 
         start_time = time.time()
-        accumulated_text = ""
 
         logger.info(f"[Agent] Direct LLM call for model: {model}")
 
@@ -409,32 +448,18 @@ class AgentService:
                 if hasattr(chunk, "additional_kwargs"):
                     reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
 
-                # 处理 reasoning_content
+                # 作为思考过程发送
                 if reasoning_content and reasoning_content.strip():
-                    if enable_thinking:
-                        # 深度思考模式：作为思考过程
-                        yield {
-                            "event": "thinking",
-                            "data": {
-                                "type": "thinking",
-                                "content": reasoning_content,
-                                "iteration": 1,
-                            }
+                    yield {
+                        "event": "thinking",
+                        "data": {
+                            "type": "thinking",
+                            "content": reasoning_content,
                         }
-                    else:
-                        # 非深度思考模式：作为最终回复（百炼返回的 reasoning_content 实际是回复内容）
-                        accumulated_text += reasoning_content
-                        yield {
-                            "event": "text",
-                            "data": {
-                                "type": "text",
-                                "content": reasoning_content,
-                            }
-                        }
+                    }
 
-                # 处理正常 content
+                # 作为回复内容发送
                 if content and content.strip():
-                    accumulated_text += content
                     yield {
                         "event": "text",
                         "data": {
@@ -489,8 +514,6 @@ class AgentService:
         Yields:
             SSE 事件字典
         """
-        import uuid
-
         agent = self._get_agent(model, enable_search=enable_search)
 
         # 生成唯一 request_id 用于搜索结果缓存隔离
@@ -515,11 +538,17 @@ class AgentService:
         current_query = ""
         # 标记是否已经完成工具调用，进入最终回复阶段
         final_response_started = False
+        # 标记是否发生了工具调用（如果没有工具调用，所有内容都是最终回复）
+        tool_called = False
 
         try:
             # 使用 astream_events 获取细粒度事件
             async for event in agent.astream_events({"messages": lc_messages}, config, version="v2"):
                 event_type = event.get("event", "")
+                event_name = event.get("name", "")
+
+                # 调试日志
+                logger.debug(f"[Agent] Event: type={event_type}, name={event_name}")
 
                 # on_chain_start: Agent 开始执行
                 if event_type == "on_chain_start":
@@ -527,11 +556,15 @@ class AgentService:
                     if name == "agent":
                         iteration += 1
                         logger.info(f"[Agent] Iteration {iteration} starting, request_id={request_id}")
+                        # 第二轮迭代时，工具调用已完成，进入最终回复阶段
+                        if iteration >= 2:
+                            final_response_started = True
 
                 # on_tool_start: 工具开始调用
                 elif event_type == "on_tool_start":
                     tool_name = event.get("name", "")
                     if tool_name == "web_search":
+                        tool_called = True
                         tool_input = event.get("data", {}).get("input", {})
                         query = tool_input.get("query", "") if isinstance(tool_input, dict) else ""
                         current_query = query
@@ -545,7 +578,6 @@ class AgentService:
                                 "toolName": "web_search",
                                 "query": query,
                                 "toolArgs": tool_input,
-                                "iteration": iteration,
                             }
                         }
 
@@ -553,7 +585,7 @@ class AgentService:
                 elif event_type == "on_tool_end":
                     tool_name = event.get("name", "")
                     if tool_name == "web_search":
-                        # 从缓存中获取搜索结果（使用 request_id 避免并发冲突）
+                        # 从缓存中获取搜索结果
                         cache_key = f"{request_id}:{current_query}"
                         request_cache_keys.append(cache_key)
 
@@ -569,86 +601,39 @@ class AgentService:
                                     "type": "search_result",
                                     "query": current_query,
                                     "sources": sources,
-                                    "iteration": iteration,
                                 }
                             }
 
-                # on_llm_stream: LLM 流式输出
-                elif event_type == "on_llm_stream":
+                # on_chat_model_stream: LLM 流式输出
+                elif event_type == "on_chat_model_stream":
                     data = event.get("data", {})
                     chunk = data.get("chunk")
 
-                    # chunk 是 AIMessageChunk 对象
                     if chunk:
-                        # 获取内容
                         content = chunk.content or ""
-
-                        # 尝试从 additional_kwargs 获取 reasoning_content（百炼扩展字段）
                         reasoning_content = ""
                         if hasattr(chunk, "additional_kwargs"):
                             reasoning_content = chunk.additional_kwargs.get("reasoning_content", "") or ""
 
-                        # 通过 tags 区分是 agent 思考还是最终回复
-                        tags = event.get("tags", [])
-
-                        # 判断是否是最终回复阶段
-                        is_final_response = "agent:llm" in str(tags) or final_response_started
-
-                        # 处理 reasoning_content
-                        # 情况1: 启用深度思考时，reasoning_content 是思考过程
-                        # 情况2: 未启用深度思考且 content 为空时，reasoning_content 作为最终回复
+                        # reasoning_content 作为思考过程
                         if reasoning_content and reasoning_content.strip():
-                            if enable_thinking:
-                                # 深度思考模式：作为思考过程发送
-                                yield {
-                                    "event": "thinking",
-                                    "data": {
-                                        "type": "thinking",
-                                        "content": reasoning_content,
-                                        "iteration": iteration,
-                                    }
+                            yield {
+                                "event": "thinking",
+                                "data": {
+                                    "type": "thinking",
+                                    "content": reasoning_content,
                                 }
-                            elif is_final_response and not content.strip():
-                                # 非深度思考模式且 content 为空：reasoning_content 作为最终回复
-                                final_response_started = True
-                                yield {
-                                    "event": "text",
-                                    "data": {
-                                        "type": "text",
-                                        "content": reasoning_content,
-                                    }
-                                }
-                            else:
-                                # 其他情况：作为思考过程发送
-                                yield {
-                                    "event": "thinking",
-                                    "data": {
-                                        "type": "thinking",
-                                        "content": reasoning_content,
-                                        "iteration": iteration,
-                                    }
-                                }
+                            }
 
-                        # 处理正常内容
+                        # content 作为回复内容
                         if content and content.strip():
-                            if is_final_response:
-                                final_response_started = True
-                                yield {
-                                    "event": "text",
-                                    "data": {
-                                        "type": "text",
-                                        "content": content,
-                                    }
+                            yield {
+                                "event": "text",
+                                "data": {
+                                    "type": "text",
+                                    "content": content,
                                 }
-                            else:
-                                yield {
-                                    "event": "thinking",
-                                    "data": {
-                                        "type": "thinking",
-                                        "content": content,
-                                        "iteration": iteration,
-                                    }
-                                }
+                            }
 
             # 发送完成事件
             yield {
@@ -659,6 +644,16 @@ class AgentService:
                     "sources": self._format_sources(all_search_results),
                     "citations": all_search_results,
                     "iterations": iteration,
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"[Agent] Error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": {
+                    "type": "error",
+                    "content": str(e),
                 }
             }
 
