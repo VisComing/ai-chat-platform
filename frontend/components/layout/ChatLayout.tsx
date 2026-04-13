@@ -10,9 +10,56 @@ import { toast } from '@/components/ui'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
+// 预认证：在组件挂载前同步读取 localStorage token
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const stored = localStorage.getItem('auth-storage')
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      return parsed?.state?.accessToken || null
+    }
+  } catch {}
+  return null
+}
+
+// 骨架屏组件
+function SkeletonLayout({ sidebarOpen }: { sidebarOpen: boolean }) {
+  return (
+    <div className="h-screen flex bg-white dark:bg-secondary-900">
+      {/* Sidebar skeleton */}
+      <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-secondary-50 dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700`}>
+        {sidebarOpen && (
+          <div className="p-4 space-y-4">
+            <div className="h-8 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="h-12 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {/* Main content skeleton */}
+      <div className="flex-1 flex flex-col">
+        <div className="h-14 bg-secondary-50 dark:bg-secondary-800 border-b border-secondary-200 dark:border-secondary-700 flex items-center px-4">
+          <div className="h-6 w-32 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ChatLayout() {
   const router = useRouter()
-  const [sidebarOpen, setSidebarOpen] = useState(false) // 移动端默认收起
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // 预认证：同步读取 localStorage，如果有 token 则先显示骨架
+  const hasStoredToken = useRef(getStoredToken() !== null)
+  // 如果有缓存 token，立即显示骨架；否则显示全屏 loading
   const [isInitializing, setIsInitializing] = useState(true)
 
   // 检测屏幕宽度，桌面端自动展开侧边栏
@@ -48,25 +95,41 @@ export function ChatLayout() {
     }
   }, [setOnSessionCreated])
 
-  // Initialize auth and sessions
+  // Initialize auth and sessions - 并行优化
   useEffect(() => {
     const init = async () => {
       try {
-        // Check if already authenticated
-        const isAuthed = await checkAuth()
+        const storedToken = getStoredToken()
 
-        if (!isAuthed) {
-          // Try auto-login test user in test mode
+        if (storedToken) {
+          // 有缓存 token：并行执行认证验证和会话加载
+          // 使用 allSettled 防止会话加载失败阻塞认证
+          const [authResult] = await Promise.allSettled([
+            checkAuth(),
+            initSessions()
+          ])
+
+          const isAuthed = authResult.status === 'fulfilled' && authResult.value
+
+          if (!isAuthed) {
+            // 认证失败，尝试自动登录
+            const autoLoginSuccess = await autoLoginTestUser()
+            if (!autoLoginSuccess) {
+              router.push('/login')
+              return
+            }
+            // 登录成功后重新加载会话
+            await initSessions()
+          }
+        } else {
+          // 无缓存 token：先认证，再加载会话（串行）
           const autoLoginSuccess = await autoLoginTestUser()
-
           if (!autoLoginSuccess) {
             router.push('/login')
             return
           }
+          await initSessions()
         }
-
-        // Initialize session store (load from database)
-        await initSessions()
 
         // Get sessionId from URL on first load
         const urlSessionId = window.location.pathname.match(/\/chat\/([^/]+)/)?.[1]
@@ -91,7 +154,6 @@ export function ChatLayout() {
           }
         }
         // If no session in URL (root path), stay on start page
-        // Don't auto-load or create session - wait for user to send message
       } catch (error) {
         console.error('Initialization error:', error)
       } finally {
@@ -158,6 +220,12 @@ export function ChatLayout() {
     }
   }, [])
 
+  // 如果有缓存 token 且正在初始化，显示骨架屏（方案 A）
+  if (isInitializing && hasStoredToken.current) {
+    return <SkeletonLayout sidebarOpen={sidebarOpen} />
+  }
+
+  // 无缓存 token 时显示全屏 loading
   if (isInitializing) {
     return (
       <div className="h-screen flex items-center justify-center bg-white dark:bg-secondary-900">

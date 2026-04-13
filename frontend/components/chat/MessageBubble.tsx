@@ -11,7 +11,6 @@ import { Avatar } from '@/components/ui'
 import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Search, ExternalLink, Clock, Globe } from 'lucide-react'
 import type { Message, Source } from '@/types'
 import { ThinkingBlock } from './ThinkingBlock'
-import { IterationsDisplay } from './IterationsDisplay'
 
 interface MessageBubbleProps {
   message: Message
@@ -71,25 +70,8 @@ export function MessageBubble({
 
       {/* Message Content */}
       <div className="flex-1 min-w-0">
-        {/* Iterations Display - 多轮迭代内容 */}
-        {!isUser && message.metadata?.iterations && message.metadata.iterations.length > 0 && (
-          <IterationsDisplay
-            iterations={message.metadata.iterations}
-            isStreaming={isStreaming}
-          />
-        )}
-
-        {/* Legacy: Fallback for old messages without iterations */}
-        {!isUser && !message.metadata?.iterations && message.metadata?.searchUsed && (
-          <SearchIndicatorWithSources
-            query={message.metadata.searchQuery || ''}
-            sources={message.metadata.sources || []}
-            isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
-          />
-        )}
-
-        {/* Legacy: Fallback thinking block */}
-        {!isUser && !message.metadata?.iterations && message.metadata?.thinking && (
+        {/* Thinking Block - 深度思考内容 */}
+        {!isUser && message.metadata?.thinking && (
           <ThinkingBlock
             content={message.metadata.thinking}
             isStreaming={isStreaming}
@@ -97,14 +79,28 @@ export function MessageBubble({
           />
         )}
 
-        {/* Legacy: Fallback tool call notification */}
-        {!isUser && !message.metadata?.iterations && message.metadata?.toolCall && !isStreaming && (
+        {/* Tool Call - 搜索工具调用指示 */}
+        {!isUser && message.metadata?.toolCall && (
           <div className="mb-2 p-2 bg-[#3b82f6]/8 rounded-lg text-sm flex items-center gap-2">
             <Search className="w-4 h-4 text-[#3b82f6]" />
             <span className="text-[#3b82f6]">
-              已调用搜索工具获取最新信息
+              {isStreaming ? '正在调用搜索工具...' : '已调用搜索工具获取最新信息'}
             </span>
+            {message.metadata.toolCall.args?.query && (
+              <span className="text-[#64748b]">
+                查询: "{message.metadata.toolCall.args.query}"
+              </span>
+            )}
           </div>
+        )}
+
+        {/* Search Result - 搜索结果 */}
+        {!isUser && message.metadata?.searchUsed && message.metadata?.sources && message.metadata.sources.length > 0 && (
+          <SearchIndicatorWithSources
+            query={message.metadata.searchQuery || ''}
+            sources={message.metadata.sources || []}
+            isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
+          />
         )}
 
         {/* Message Bubble - 用户消息无背景 */}

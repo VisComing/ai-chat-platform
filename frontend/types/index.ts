@@ -81,7 +81,11 @@ export interface MessageMetadata {
   searchResultCount?: number
   toolCall?: {
     name: string
-    args?: Record<string, unknown>
+    args?: {
+      query?: string
+      time_range?: string
+      [key: string]: unknown  // 允许其他参数
+    }
     result?: {
       success: boolean
       message?: string
