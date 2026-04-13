@@ -37,7 +37,11 @@ THINKING_MODELS = [
     'glm-4.7',
     'kimi-k2.5',
     'MiniMax-M2.5',
+    'deepseek-reasoner',
 ]
+
+# DeepSeek 模型列表（需要使用 DeepSeek API）
+DEEPSEEK_MODELS = ['deepseek-chat', 'deepseek-reasoner']
 
 # 支持多模态的模型（图片输入）
 MULTIMODAL_MODELS = [
@@ -266,7 +270,7 @@ class AgentService:
         return "你是一个智能助手，能够帮助用户解答问题。"
 
     def _create_llm(self, model: str) -> ChatOpenAI:
-        """创建 LLM 实例"""
+        """创建 LLM 实例，根据模型选择对应的 API"""
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("http_proxy")
 
         http_client = None
@@ -274,10 +278,20 @@ class AgentService:
             http_client = httpx.AsyncClient(proxy=proxy, timeout=60.0)
             logger.info(f"[Agent] Using proxy: {proxy}")
 
+        # 根据模型选择 API 配置
+        if model in DEEPSEEK_MODELS:
+            api_key = self.settings.deepseek_api_key
+            base_url = self.settings.deepseek_base_url
+            logger.info(f"[Agent] Using DeepSeek API for model: {model}")
+        else:
+            api_key = self.settings.bailian_api_key
+            base_url = self.settings.bailian_base_url
+            logger.info(f"[Agent] Using Bailian API for model: {model}")
+
         return ChatOpenAI(
             model=model,
-            openai_api_key=self.settings.bailian_api_key,
-            openai_api_base=self.settings.bailian_base_url,
+            openai_api_key=api_key,
+            openai_api_base=base_url,
             temperature=self.settings.default_temperature,
             max_tokens=self.settings.max_tokens,
             http_async_client=http_client,

@@ -17,7 +17,6 @@
 - 将任务拆分为低耦合、可独立验证的子任务，必要时使用 `/batch`。
 - 重复出现 3 次的流程应沉淀为 Skill。
 
-
 ## 质量要求
 - 项目早期只保留最小必要质量标准：可运行、可验证、可回滚。
 - 优先保证关键路径和高风险改动可验证。
@@ -26,12 +25,6 @@
 ## 纠错与协作
 - 被纠正时，识别原因并改进做法；对重复性问题，沉淀为明确规则。
 - 实现与审查分离：先完成方案或代码，再独立复核。
-
-
-## 禁止事项
-- `CLAUDE.md` 应按项目实际需求编写，不要套用空泛模板。
-- Avoid terms to describe development progress (`FIXED`, `Step`, `Week`, `Section`, `Phase`, `AC-x`, etc) in code comments or commit message or PR body.
-- Avoid AI tools name (like Codex, Claude, Grok, Gemini, ...) in code comments or git commit message (including authorship) or PR body.
 
 ## 其余事项
 - 聂网搜索优先使用websearch MCP

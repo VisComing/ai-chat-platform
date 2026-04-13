@@ -74,6 +74,21 @@ export const AVAILABLE_MODELS: AIModel[] = [
     capabilities: ['文本生成', '深度思考'],
     description: 'MiniMax旗舰模型，创意能力强',
   },
+  // DeepSeek系列
+  {
+    id: 'deepseek-chat',
+    name: 'DeepSeek Chat',
+    provider: 'DeepSeek',
+    capabilities: ['文本生成'],
+    description: 'DeepSeek对话模型，性价比高',
+  },
+  {
+    id: 'deepseek-reasoner',
+    name: 'DeepSeek Reasoner',
+    provider: 'DeepSeek',
+    capabilities: ['文本生成', '深度思考'],
+    description: 'DeepSeek推理模型，擅长复杂推理',
+  },
 ]
 
 // Models that support deep thinking (showing reasoning process)
@@ -85,6 +100,7 @@ export const THINKING_MODELS = [
   'glm-4.7',
   'kimi-k2.5',
   'MiniMax-M2.5',
+  'deepseek-reasoner',
 ]
 
 // Models that support visual understanding (multimodal image input)
@@ -141,6 +157,8 @@ export function ModelSelector({
         return <Eye className="w-4 h-4" />
       case 'MiniMax':
         return <Code className="w-4 h-4" />
+      case 'DeepSeek':
+        return <Brain className="w-4 h-4" />
       default:
         return <Sparkles className="w-4 h-4" />
     }
