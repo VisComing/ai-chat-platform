@@ -226,8 +226,8 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None  # Will use settings.default_model
     temperature: Optional[float] = 0.7
     maxTokens: Optional[int] = Field(4096, alias="max_tokens")
-    enableThinking: Optional[bool] = Field(False, alias="enable_thinking")
-    useAgent: Optional[bool] = Field(True, alias="use_agent")  # Enable agent mode (with search)
+    enableSearch: Optional[bool] = Field(True, alias="enable_search")  # Enable web search (user control)
+    enableThinking: Optional[bool] = Field(False, alias="enable_thinking")  # Enable deep thinking (user control)
     tools: Optional[List[dict]] = None
     metadata: Optional[dict] = None
 

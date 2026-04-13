@@ -70,6 +70,30 @@ class ApiClient {
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
 
+        // Handle 422 validation errors - extract message from Pydantic format
+        if (response.status === 422 && Array.isArray(error.detail)) {
+          const messages = error.detail.map((e: { loc: string[]; msg: string }) => {
+            const field = e.loc[e.loc.length - 1]
+            return `${field}: ${e.msg}`
+          })
+          throw new Error(messages.join(', '))
+        }
+
+        // Handle error detail that is a string
+        if (typeof error.detail === 'string') {
+          throw new Error(error.detail)
+        }
+
+        // Handle error with message
+        if (error.message) {
+          throw new Error(error.message)
+        }
+
+        // Handle error with nested error.message (backend ApiResponse error format)
+        if (error.error?.message) {
+          throw new Error(error.error.message)
+        }
+
         // Handle 401 Unauthorized - token may have expired
         if (response.status === 401 && !config.skipAuthRefresh) {
           // Try to refresh token and retry
@@ -95,7 +119,7 @@ class ApiClient {
           }
         }
 
-        throw new Error(error.detail || error.message || `HTTP ${response.status}`)
+        throw new Error(`请求失败 (${response.status})`)
       }
 
       return response.json()

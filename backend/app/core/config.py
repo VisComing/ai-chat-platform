@@ -44,7 +44,11 @@ class Settings(BaseSettings):
     default_model: str = "qwen3.5-plus"
     max_tokens: int = 4096
     default_temperature: float = 0.7
-    
+
+    # DeepSeek API (OpenAI compatible)
+    deepseek_api_key: str = ""  # Required: Set via DEEPSEEK_API_KEY env var
+    deepseek_base_url: str = "https://api.deepseek.com"
+
     # Supported models
     supported_models: list[str] = [
         "qwen3.5-plus",
@@ -55,6 +59,8 @@ class Settings(BaseSettings):
         "glm-4.7",
         "kimi-k2.5",
         "MiniMax-M2.5",
+        "deepseek-chat",
+        "deepseek-reasoner",
     ]
 
     # Model capabilities
@@ -72,6 +78,7 @@ class Settings(BaseSettings):
         "glm-4.7",
         "kimi-k2.5",
         "MiniMax-M2.5",
+        "deepseek-reasoner",
     ]
     
     # Alibaba Cloud Search Service (IQS) - UnifiedSearch API

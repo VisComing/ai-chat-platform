@@ -3,14 +3,26 @@ Deep Research Models - MongoDB Beanie Documents
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import Field
+from pydantic import Field, field_validator
 from beanie import Document, Indexed
+from bson import ObjectId
 import uuid
 import enum
 
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+def objectid_to_str(v: Any) -> str:
+    """Convert ObjectId to string, keep string as-is"""
+    if v is None:
+        return generate_uuid()
+    if isinstance(v, ObjectId):
+        return str(v)
+    if isinstance(v, str):
+        return v
+    return str(v)
 
 
 class ResearchTaskStatus(str, enum.Enum):
@@ -74,6 +86,11 @@ class ResearchTask(Document):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
+
     class Settings:
         name = "research_tasks"
         indexes = [
@@ -98,6 +115,11 @@ class ResearchClarification(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     answered_at: Optional[datetime] = None
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
+
     class Settings:
         name = "research_clarifications"
         indexes = ["task_id"]
@@ -116,6 +138,11 @@ class UserResearchQuota(Document):
     daily_used: int = 0   # 今日已使用次数
     last_reset_date: datetime = Field(default_factory=datetime.utcnow)  # 上次重置日期
     total_tasks: int = 0  # 总任务数
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
 
     class Settings:
         name = "user_research_quota"

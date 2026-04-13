@@ -13,9 +13,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.security import get_current_user_id
 from app.schemas import ChatRequest, ApiResponse
 from app.models import Session, Message, ChatTask
-from app.services.ai_service import ai_service
 from app.services.chat_task_service import chat_task_manager
-from app.services.title_service import generate_and_push_title
+from app.services.agent_service import agent_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -35,8 +34,9 @@ async def chat_stream(
     SSE Events:
     - task: 任务创建事件，包含 taskId
     - session: 新会话创建事件
-    - thinking: AI 思考中（深度思考模式）
-    - tool_call: Agent 调用工具
+    - thinking: AI 思考内容（深度思考模式，每轮都展示）
+    - tool_call: Agent 调用工具（每轮都展示）
+    - search_result: 搜索结果（每轮都展示）
     - text: 文本块
     - title: 自动生成的会话标题
     - complete: 响应完成
@@ -54,7 +54,7 @@ async def chat_stream(
                 session_id=request.sessionId,
                 content=content,
                 model=request.model,
-                use_agent=request.useAgent,
+                enable_search=request.enableSearch if hasattr(request, 'enableSearch') else True,
                 enable_thinking=request.enableThinking,
             ):
                 yield event
@@ -155,7 +155,7 @@ async def cancel_task(
     """
     取消正在运行的任务
     """
-    # 验证任务所有权
+    # 集证任务所有权
     task = await ChatTask.find_one(
         ChatTask.id == task_id,
         ChatTask.user_id == user_id,
@@ -217,7 +217,7 @@ async def get_supported_models():
     """获取支持的 AI 模型列表"""
     return {
         "success": True,
-        "data": ai_service.get_supported_models()
+        "data": agent_service.settings.supported_models
     }
 
 
@@ -226,7 +226,7 @@ async def _create_and_stream_chat(
     session_id: str | None,
     content: dict,
     model: str | None,
-    use_agent: bool = False,
+    enable_search: bool = True,
     enable_thinking: bool = False,
 ):
     """
@@ -334,7 +334,7 @@ async def _create_and_stream_chat(
         ai_message=ai_message,
         messages=messages,
         model=model,
-        use_agent=use_agent,
+        enable_search=enable_search,
         enable_thinking=enable_thinking,
     )
 
@@ -342,31 +342,42 @@ async def _create_and_stream_chat(
     queue = await chat_task_manager.subscribe(task.id)
 
     try:
+        received_complete = False
         while True:
+            # 收到 complete 后用较短超时等待 title
+            timeout = 20.0 if received_complete else 60.0
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=60.0)
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
                 yield event
 
                 # 检查是否完成
-                if event.get("event") in ["complete", "error"]:
+                if event.get("event") == "complete":
+                    received_complete = True
+                    # 不立即 break，继续监听可能的 title 事件
+                elif event.get("event") == "error":
+                    break
+                elif event.get("event") == "title" and received_complete:
+                    # 收到 title 事件且已完成，可以结束流
                     break
             except asyncio.TimeoutError:
-                # 发送心跳
+                if received_complete:
+                    # 已收到 complete，超时后结束流
+                    break
+                # 否则发送心跳继续等待
                 yield {"event": "heartbeat", "data": "{}"}
     finally:
         await chat_task_manager.unsubscribe(task.id, queue)
 
 
-# 保留旧端点兼容性
+# 保留旧端点兼容性（已弃用）
 @router.post("/agent/stream")
 async def agent_stream(
     request: ChatRequest,
     user_id: str = Depends(get_current_user_id),
 ):
     """
-    Agent 聊天流（已弃用，请使用 /stream 并设置 useAgent=true）
+    Agent 聊天流（已弃用，请使用 /stream）
 
     保留此端点以保持向后兼容。
     """
-    request.useAgent = True
     return await chat_stream(request, user_id)

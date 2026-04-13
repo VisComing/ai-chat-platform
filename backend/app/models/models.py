@@ -3,7 +3,7 @@ MongoDB Models using Beanie ODM
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import Field
+from pydantic import Field, field_validator
 from beanie import Document, Indexed
 from bson import ObjectId
 import uuid
@@ -11,6 +11,17 @@ import uuid
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+def objectid_to_str(v: Any) -> str:
+    """Convert ObjectId to string, keep string as-is"""
+    if v is None:
+        return generate_uuid()
+    if isinstance(v, ObjectId):
+        return str(v)
+    if isinstance(v, str):
+        return v
+    return str(v)
 
 
 class User(Document):
@@ -25,6 +36,11 @@ class User(Document):
     is_verified: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
 
     class Settings:
         name = "users"
@@ -53,6 +69,11 @@ class UserSettings(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
+
     class Settings:
         name = "user_settings"
         indexes = ["user_id"]
@@ -77,6 +98,11 @@ class Session(Document):
     updated_at: Optional[datetime] = None
     meta: Optional[Dict[str, Any]] = None
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
+
     class Settings:
         name = "sessions"
         indexes = [
@@ -99,6 +125,11 @@ class Message(Document):
     meta: Optional[Dict[str, Any]] = None
     created_at: Indexed(datetime) = Field(default_factory=datetime.utcnow)  # Index for ordering
     updated_at: Optional[datetime] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
 
     class Settings:
         name = "messages"
@@ -124,6 +155,11 @@ class File(Document):
     content: Optional[str] = None  # Parsed text content
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
+
     class Settings:
         name = "files"
         indexes = ["user_id"]
@@ -144,6 +180,11 @@ class ChatTask(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, v):
+        return objectid_to_str(v)
 
     class Settings:
         name = "chat_tasks"

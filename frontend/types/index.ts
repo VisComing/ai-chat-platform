@@ -48,14 +48,32 @@ export interface MixedContent {
 
 export type MessageContent = TextContent | ImageContent | FileContent | CodeContent | MixedContent
 
+export interface IterationData {
+  iteration: number | 'final'
+  thinking?: string  // 该轮思考内容
+  toolCall?: {
+    name: string
+    args?: {
+      query?: string
+      time_range?: string
+    }
+  }
+  searchResult?: {
+    query: string
+    sources: Source[]
+    resultCount: number
+  }
+}
+
 export interface MessageMetadata {
   model?: string
   tokens?: {
     input: number
     output: number
   }
-  thinking?: string
-  isDeepThinking?: boolean  // Whether this is deep thinking mode (DeepSeek R1)
+  thinking?: string  // Deprecated: use iterations instead
+  isDeepThinking?: boolean  // Deprecated: use iterations instead
+  iterations?: IterationData[]  // 多轮迭代内容
   sources?: Source[]
   citations?: Citation[]
   searchUsed?: boolean
@@ -63,7 +81,11 @@ export interface MessageMetadata {
   searchResultCount?: number
   toolCall?: {
     name: string
-    args?: Record<string, unknown>
+    args?: {
+      query?: string
+      time_range?: string
+      [key: string]: unknown  // 允许其他参数
+    }
     result?: {
       success: boolean
       message?: string
@@ -180,26 +202,27 @@ export interface Tool {
 
 // Stream Types
 export interface StreamChunk {
-  type: 'text' | 'thinking' | 'complete' | 'error' | 'tool_call' | 'session' | 'title' | 'search_start' | 'search_result'
+  type: 'text' | 'thinking' | 'complete' | 'error' | 'tool_call' | 'session' | 'title' | 'search_start' | 'search_result' | 'task' | 'resumed'
   content?: string
   status?: string // For thinking events
   messageId?: string
   sessionId?: string
+  taskId?: string
   title?: string
   toolName?: string
   toolArgs?: Record<string, unknown>
   resultCount?: number
   sources?: Source[] // 搜索结果，在 tool_call 事件中实时发送
+  query?: string // Search query
+  iteration?: number | 'final' // Iteration number for agent execution
   toolResult?: {
-    success: boolean
+    success?: boolean
     resultCount?: number
     sources?: Source[]
     message?: string
   }
-  metadata?: MessageMetadata & {
-    sources?: Source[]
-    search_used?: boolean
-  }
+  metadata?: MessageMetadata
+  search_used?: boolean
 }
 
 // Settings Types

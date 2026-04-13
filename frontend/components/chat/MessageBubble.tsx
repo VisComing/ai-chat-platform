@@ -70,17 +70,8 @@ export function MessageBubble({
 
       {/* Message Content */}
       <div className="flex-1 min-w-0">
-        {/* Search Indicator with Sources */}
-        {!isUser && message.metadata?.searchUsed && (
-          <SearchIndicatorWithSources
-            query={message.metadata.searchQuery || ''}
-            sources={message.metadata.sources || []}
-            isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
-          />
-        )}
-
-        {/* Thinking Block */}
-        {message.metadata?.thinking && !isUser && (
+        {/* Thinking Block - 深度思考内容 */}
+        {!isUser && message.metadata?.thinking && (
           <ThinkingBlock
             content={message.metadata.thinking}
             isStreaming={isStreaming}
@@ -88,14 +79,28 @@ export function MessageBubble({
           />
         )}
 
-        {/* Tool Call Notification */}
-        {!isUser && message.metadata?.toolCall && !isStreaming && (
+        {/* Tool Call - 搜索工具调用指示 */}
+        {!isUser && message.metadata?.toolCall && (
           <div className="mb-2 p-2 bg-[#3b82f6]/8 rounded-lg text-sm flex items-center gap-2">
             <Search className="w-4 h-4 text-[#3b82f6]" />
             <span className="text-[#3b82f6]">
-              已调用搜索工具获取最新信息
+              {isStreaming ? '正在调用搜索工具...' : '已调用搜索工具获取最新信息'}
             </span>
+            {message.metadata.toolCall.args?.query && (
+              <span className="text-[#64748b]">
+                查询: "{message.metadata.toolCall.args.query}"
+              </span>
+            )}
           </div>
+        )}
+
+        {/* Search Result - 搜索结果 */}
+        {!isUser && message.metadata?.searchUsed && message.metadata?.sources && message.metadata.sources.length > 0 && (
+          <SearchIndicatorWithSources
+            query={message.metadata.searchQuery || ''}
+            sources={message.metadata.sources || []}
+            isSearching={isStreaming && message.metadata.toolCall?.name === 'web_search'}
+          />
         )}
 
         {/* Message Bubble - 用户消息无背景 */}

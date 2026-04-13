@@ -31,8 +31,8 @@ interface InputAreaProps {
   selectedModel?: string
   onModelChange?: (model: string) => void
   onSettingsClick?: () => void
-  useAgent?: boolean
-  onAgentChange?: (useAgent: boolean) => void
+  enableSearch?: boolean
+  onSearchChange?: (enable: boolean) => void
   enableThinking?: boolean
   onThinkingChange?: (enable: boolean) => void
   enableDeepResearch?: boolean
@@ -52,8 +52,8 @@ export function InputArea({
   selectedModel = 'qwen3.5-plus',
   onModelChange,
   onSettingsClick,
-  useAgent = false,
-  onAgentChange,
+  enableSearch = false,
+  onSearchChange,
   enableThinking = false,
   onThinkingChange,
   enableDeepResearch = false,
@@ -411,17 +411,17 @@ export function InputArea({
                   <span className="hidden sm:inline">深度思考</span>
                 </button>
               )}
-              {/* Agent Mode Toggle */}
-              {onAgentChange && (
+              {/* Search Toggle */}
+              {onSearchChange && (
                 <button
-                  onClick={() => onAgentChange(!useAgent)}
+                  onClick={() => onSearchChange(!enableSearch)}
                   className={cn(
                     'flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-3 rounded-full text-sm font-medium transition-all duration-200',
-                    useAgent
+                    enableSearch
                       ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
                       : 'bg-[#f5f5f5] dark:bg-white/5 text-[#64748b] hover:bg-[#e5e7eb] dark:hover:bg-white/10'
                   )}
-                  title={useAgent ? '联网搜索已启用' : '启用联网搜索'}
+                  title={enableSearch ? '联网搜索已启用' : '启用联网搜索'}
                   type="button"
                 >
                   <Globe className="w-4 h-4" />
@@ -532,7 +532,7 @@ export function InputArea({
               深度思考
             </span>
           )}
-          {useAgent && (
+          {enableSearch && (
             <span className="text-[#3b82f6] flex items-center gap-1">
               <Globe className="w-3 h-3" />
               联网搜索

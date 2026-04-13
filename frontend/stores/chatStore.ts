@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Message, ChatRequest, StreamChunk } from '@/types'
+import type { Message, ChatRequest, StreamChunk, Source } from '@/types'
 import { chatService } from '@/services/chatService'
 import { generateId } from '@/lib/utils'
 import { useSessionStore } from './sessionStore'
@@ -14,8 +14,8 @@ interface ChatState {
   streamingMessageId: string | null
   error: string | null
   selectedModel: string
-  useAgent: boolean  // Agent mode toggle
-  enableThinking: boolean  // Deep thinking mode toggle (DeepSeek R1)
+  enableSearch: boolean  // Web search toggle (user control)
+  enableThinking: boolean  // Deep thinking mode toggle (user control)
   onSessionCreated?: (sessionId: string) => void // Callback for URL navigation
 
   // Actions
@@ -28,7 +28,7 @@ interface ChatState {
   loadMessages: (sessionId: string) => Promise<void>
   setCurrentSession: (sessionId: string | null) => void
   setSelectedModel: (model: string) => void
-  setUseAgent: (useAgent: boolean) => void
+  setEnableSearch: (enable: boolean) => void
   setEnableThinking: (enable: boolean) => void
   setOnSessionCreated: (callback: (sessionId: string) => void) => void
   resumeSession: (sessionId: string) => Promise<boolean> // 恢复会话（刷新后）
@@ -44,7 +44,7 @@ export const useChatStore = create<ChatState>()(
       streamingMessageId: null,
       error: null,
       selectedModel: 'qwen3.5-plus',
-      useAgent: true,  // Default: Agent mode ENABLED
+      enableSearch: false,  // Default: Web search DISABLED
       enableThinking: false,  // Default: Deep thinking mode DISABLED
       onSessionCreated: undefined,
 
@@ -55,7 +55,7 @@ export const useChatStore = create<ChatState>()(
       },
 
       sendMessage: async (request) => {
-        const { messagesBySession, currentSessionId, selectedModel, useAgent } = get()
+        const { messagesBySession, currentSessionId, selectedModel, enableSearch } = get()
         let sessionId = request.sessionId || currentSessionId || 'default'
         const currentMessages = messagesBySession[sessionId] || []
 
@@ -92,8 +92,8 @@ export const useChatStore = create<ChatState>()(
         })
 
         try {
-          // Stream response (use Agent endpoint if enabled)
-          console.log('[ChatStore] sendMessage - useAgent:', useAgent, 'selectedModel:', selectedModel)
+          // Stream response
+          console.log('[ChatStore] sendMessage - enableSearch:', enableSearch, 'selectedModel:', selectedModel)
           const { taskId } = await chatService.streamChat(
             {
               ...request,
@@ -147,17 +147,24 @@ export const useChatStore = create<ChatState>()(
               }
 
               if (chunk.type === 'text' && state.streamingMessageId) {
+                // 重新获取最新状态，避免 stale snapshot 导致 metadata 被覆盖
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
+
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             content: {
                               type: 'text',
                               text: (msg.content.type === 'text' ? msg.content.text : '') + chunk.content,
                             },
+                            // 保留现有 metadata（包括 search_result 设置的 sources）
+                            metadata: currentMsg?.metadata,
                             updatedAt: new Date(),
                           }
                         : msg
@@ -165,46 +172,44 @@ export const useChatStore = create<ChatState>()(
                   },
                 })
               } else if (chunk.type === 'thinking' && state.streamingMessageId) {
-                // Handle thinking event - content is incremental for deep thinking mode
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
+                // Handle thinking event - 直接累加思考内容
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
                 const existingThinking = currentMsg?.metadata?.thinking || ''
-
-                // If chunk has content, it's incremental; otherwise use status as static text
-                const newThinking = chunk.content
-                  ? existingThinking + chunk.content  // Incremental from deep thinking
-                  : (chunk.status || '正在思考...')   // Static status from agent
+                const newThinking = existingThinking + (chunk.content || '')
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
                               thinking: newThinking,
-                              isDeepThinking: !!chunk.content,  // Mark if it's deep thinking mode
+                              isDeepThinking: true,
                             },
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'tool_call' && state.streamingMessageId) {
-                // Handle tool call event (e.g., web search)
+              } else if (chunk.type === 'tool_call' && get().streamingMessageId) {
+                // Handle tool call event - 直接记录工具调用
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const toolName = chunk.toolName || 'unknown'
-                const queryValue = chunk.toolArgs?.query
-                const searchQuery = typeof queryValue === 'string' ? queryValue : ''
-                const resultCount = chunk.resultCount || 0
-                // 获取搜索结果 sources
-                const sources = chunk.sources || []
+                const queryValue = chunk.query || chunk.toolArgs?.query || ''
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
@@ -212,30 +217,41 @@ export const useChatStore = create<ChatState>()(
                               toolCall: {
                                 name: toolName,
                                 args: chunk.toolArgs,
+                                query: queryValue,
                               },
                               searchUsed: toolName === 'web_search',
-                              searchQuery: searchQuery,
-                              searchResultCount: resultCount,
-                              sources: sources,  // 实时保存搜索结果
+                              searchQuery: typeof queryValue === 'string' ? queryValue : '',
                             },
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'search_result' && state.streamingMessageId) {
-                // Handle search result event
+              } else if (chunk.type === 'search_result' && get().streamingMessageId) {
+                // Handle search result event - 直接记录搜索结果
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const sources = chunk.sources || []
+                const resultCount = chunk.resultCount || sources.length
+
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              searchResultCount: chunk.toolResult?.resultCount || 0,
-                              sources: chunk.toolResult?.sources || [],
+                              searchResult: {
+                                query: chunk.query || '',
+                                sources: sources,
+                                resultCount: resultCount,
+                              },
+                              searchResultCount: resultCount,
+                              sources: sources,
+                              searchUsed: true,  // 标记搜索已启用，确保前端立即渲染
                             },
                           }
                         : msg
@@ -252,7 +268,7 @@ export const useChatStore = create<ChatState>()(
                 const existingMetadata = currentMessage?.metadata || {}
 
                 // 从 complete 事件直接获取 sources（后端发送格式）
-                const completeSources = chunk.sources || chunk.metadata?.sources || existingMetadata.sources || []
+                const completeSources: Source[] = chunk.sources || (chunk.metadata?.sources as Source[]) || existingMetadata.sources || []
 
                 set({
                   isLoading: false,
@@ -270,7 +286,7 @@ export const useChatStore = create<ChatState>()(
                               ...chunk.metadata,
                               // Include sources from complete event
                               sources: completeSources,
-                              searchUsed: chunk.metadata?.search_used ?? chunk.search_used ?? existingMetadata.searchUsed ?? false,
+                              searchUsed: chunk.search_used ?? (chunk.metadata?.searchUsed as boolean) ?? existingMetadata.searchUsed ?? false,
                             },
                           }
                         : msg
@@ -285,9 +301,9 @@ export const useChatStore = create<ChatState>()(
                   currentTaskId: null,
                   error: chunk.content,
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...get().messagesBySession,
+                    [sessionId]: (get().messagesBySession[sessionId] || []).map((msg) =>
+                      msg.id === get().streamingMessageId
                         ? {
                             ...msg,
                             status: 'error',
@@ -299,7 +315,7 @@ export const useChatStore = create<ChatState>()(
                 })
               }
             },
-            useAgent  // Pass Agent mode flag
+            enableSearch  // Pass enableSearch flag
           )
 
           // Store taskId
@@ -432,8 +448,8 @@ export const useChatStore = create<ChatState>()(
         set({ selectedModel: model })
       },
 
-      setUseAgent: (useAgent: boolean) => {
-        set({ useAgent })
+      setEnableSearch: (enableSearch: boolean) => {
+        set({ enableSearch })
       },
 
       setEnableThinking: (enableThinking: boolean) => {
@@ -500,69 +516,112 @@ export const useChatStore = create<ChatState>()(
             runningTask.taskId,
             streamingMessage.id,
             (chunk: StreamChunk) => {
-              const state = get()
-              const sessionMessages = state.messagesBySession[sessionId] || []
+              if (chunk.type === 'text' && get().streamingMessageId) {
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
 
-              if (chunk.type === 'text' && state.streamingMessageId) {
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             content: {
                               type: 'text',
                               text: (msg.content.type === 'text' ? msg.content.text : '') + chunk.content,
                             },
+                            // 保留现有 metadata（包括 search_result 设置的 sources）
+                            metadata: currentMsg?.metadata,
                             updatedAt: new Date(),
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'thinking' && state.streamingMessageId) {
-                const currentMsg = sessionMessages.find((msg) => msg.id === state.streamingMessageId)
+              } else if (chunk.type === 'thinking' && get().streamingMessageId) {
+                // Handle thinking event - 直接累加思考内容
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const currentMsg = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
                 const existingThinking = currentMsg?.metadata?.thinking || ''
-
-                const newThinking = chunk.content
-                  ? existingThinking + chunk.content
-                  : (chunk.status || '正在思考...')
+                const newThinking = existingThinking + (chunk.content || '')
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
                               thinking: newThinking,
-                              isDeepThinking: !!chunk.content,
+                              isDeepThinking: true,
                             },
                           }
                         : msg
                     ),
                   },
                 })
-              } else if (chunk.type === 'tool_call' && state.streamingMessageId) {
+              } else if (chunk.type === 'tool_call' && get().streamingMessageId) {
+                // Handle tool call event - 直接记录工具调用
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const toolName = chunk.toolName || 'unknown'
-                const queryValue = chunk.toolArgs?.query
-                const searchQuery = typeof queryValue === 'string' ? queryValue : ''
+                const queryValue = chunk.query || chunk.toolArgs?.query || ''
 
                 set({
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? {
                             ...msg,
                             metadata: {
                               ...msg.metadata,
-                              toolCall: { name: toolName, args: chunk.toolArgs },
+                              toolCall: {
+                                name: toolName,
+                                args: chunk.toolArgs,
+                                query: queryValue,
+                              },
                               searchUsed: toolName === 'web_search',
-                              searchQuery,
+                              searchQuery: typeof queryValue === 'string' ? queryValue : '',
+                            },
+                          }
+                        : msg
+                    ),
+                  },
+                })
+              } else if (chunk.type === 'search_result' && get().streamingMessageId) {
+                // Handle search result event - 直接记录搜索结果
+                // 重新获取最新状态，避免 stale snapshot
+                const currentState = get()
+                const latestSessionMessages = currentState.messagesBySession[sessionId] || []
+                const sources = chunk.sources || []
+                const resultCount = chunk.resultCount || sources.length
+
+                set({
+                  messagesBySession: {
+                    ...currentState.messagesBySession,
+                    [sessionId]: latestSessionMessages.map((msg) =>
+                      msg.id === currentState.streamingMessageId
+                        ? {
+                            ...msg,
+                            metadata: {
+                              ...msg.metadata,
+                              searchResult: {
+                                query: chunk.query || '',
+                                sources: sources,
+                                resultCount: resultCount,
+                              },
+                              searchResultCount: resultCount,
+                              sources: sources,
+                              searchUsed: true,  // 标记搜索已启用，确保前端立即渲染
                             },
                           }
                         : msg
@@ -574,7 +633,7 @@ export const useChatStore = create<ChatState>()(
                 const latestSessionMessages = currentState.messagesBySession[sessionId] || []
                 const currentMessage = latestSessionMessages.find((msg) => msg.id === currentState.streamingMessageId)
                 const existingMetadata = currentMessage?.metadata || {}
-                const completeSources = chunk.sources || chunk.metadata?.sources || existingMetadata.sources || []
+                const completeSources: Source[] = chunk.sources || (chunk.metadata?.sources as Source[]) || existingMetadata.sources || []
 
                 set({
                   isLoading: false,
@@ -598,15 +657,16 @@ export const useChatStore = create<ChatState>()(
                   },
                 })
               } else if (chunk.type === 'error') {
+                const currentState = get()
                 set({
                   isLoading: false,
                   streamingMessageId: null,
                   currentTaskId: null,
                   error: chunk.content,
                   messagesBySession: {
-                    ...state.messagesBySession,
-                    [sessionId]: sessionMessages.map((msg) =>
-                      msg.id === state.streamingMessageId
+                    ...currentState.messagesBySession,
+                    [sessionId]: (currentState.messagesBySession[sessionId] || []).map((msg) =>
+                      msg.id === currentState.streamingMessageId
                         ? { ...msg, status: 'error', content: { type: 'text', text: chunk.content || '发生错误' } }
                         : msg
                     ),
@@ -634,7 +694,7 @@ export const useChatStore = create<ChatState>()(
       // Only persist user preferences, not messages (messages are stored in backend)
       partialize: (state) => ({
         selectedModel: state.selectedModel,
-        useAgent: state.useAgent,
+        enableSearch: state.enableSearch,
         enableThinking: state.enableThinking,
       }),
     }

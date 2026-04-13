@@ -3,8 +3,9 @@
 import * as React from 'react'
   import { cn } from '@/lib/utils'
   import { Zap, Diamond, Sparkles, Search, Send, Paperclip, Brain, Loader2 } from 'lucide-react'
-  import { ModelSelector } from './ModelSelector'
+  import { ModelSelector, isThinkingModel } from './ModelSelector'
   import { VoiceInput } from './VoiceInput'
+  import { useChatStore } from '@/stores/chatStore'
 
 // ============= Types =============
 
@@ -112,6 +113,7 @@ function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
 
 interface FeatureButtonsProps {
   mode: ChatMode
+  selectedModel: string
   enableDeepThinking: boolean
   enableSearch: boolean
   enableDeepResearch: boolean
@@ -122,6 +124,7 @@ interface FeatureButtonsProps {
 
 function FeatureButtons({
   mode,
+  selectedModel,
   enableDeepThinking,
   enableSearch,
   enableDeepResearch,
@@ -129,19 +132,25 @@ function FeatureButtons({
   onSearchChange,
   onDeepResearchChange,
 }: FeatureButtonsProps) {
+  const thinkingSupported = isThinkingModel(selectedModel)
+
   return (
     <div className="flex items-center gap-2">
       {/* 深度思考 */}
       <button
-        onClick={() => onDeepThinkingChange(!enableDeepThinking)}
+        onClick={() => thinkingSupported && onDeepThinkingChange(!enableDeepThinking)}
+        disabled={!thinkingSupported}
         className={cn(
           'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium transition-all duration-200 border',
-          enableDeepThinking
-            ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-500/30'
-            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600'
+          !thinkingSupported
+            ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed dark:bg-slate-800/30 dark:border-slate-700/30 dark:text-slate-500'
+            : enableDeepThinking
+              ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-500/30'
+              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600'
         )}
+        title={!thinkingSupported ? '当前模型不支持深度思考' : enableDeepThinking ? '深度思考已启用' : '启用深度思考'}
       >
-        <Brain className={cn('w-4 h-4', enableDeepThinking && 'text-blue-500')} />
+        <Brain className={cn('w-4 h-4', enableDeepThinking && thinkingSupported && 'text-blue-500')} />
         <span className="hidden sm:inline">深度思考</span>
       </button>
 
@@ -189,10 +198,14 @@ export function DeepSeekStartPage({
   const [mode, setMode] = React.useState<ChatMode>('quick')
   const [inputValue, setInputValue] = React.useState('')
   const [voiceText, setVoiceText] = React.useState('')
-  const [enableDeepThinking, setEnableDeepThinking] = React.useState(false)
-  const [enableSearch, setEnableSearch] = React.useState(true)
   const [enableDeepResearch, setEnableDeepResearch] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
+
+  // 从 chatStore 获取持久化的设置值
+  const enableSearch = useChatStore((state) => state.enableSearch)
+  const enableDeepThinking = useChatStore((state) => state.enableThinking)
+  const setEnableSearch = useChatStore((state) => state.setEnableSearch)
+  const setEnableDeepThinking = useChatStore((state) => state.setEnableThinking)
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
@@ -209,14 +222,12 @@ export function DeepSeekStartPage({
   const handleModeChange = (newMode: ChatMode) => {
     setMode(newMode)
     if (newMode === 'expert') {
-      // 专家模式强制开启深度研究，关闭深度思考和联网搜索
+      // 专家模式强制开启深度研究，关闭深度思考
       setEnableDeepResearch(true)
       setEnableDeepThinking(false)
-      setEnableSearch(false)
     } else {
-      // 快速模式关闭深度研究
+      // 快速模式关闭深度研究，保留用户的联网搜索设置
       setEnableDeepResearch(false)
-      setEnableSearch(true)
     }
   }
   const handleDeepResearchChange = (enable: boolean) => {
@@ -341,6 +352,7 @@ export function DeepSeekStartPage({
           <div className="flex items-center gap-2">
             <FeatureButtons
               mode={mode}
+              selectedModel={selectedModel || 'qwen3.5-plus'}
               enableDeepThinking={enableDeepThinking}
               enableSearch={enableSearch}
               enableDeepResearch={enableDeepResearch}

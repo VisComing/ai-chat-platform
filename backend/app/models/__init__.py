@@ -6,6 +6,7 @@ from app.models.research import (
     ResearchTaskStatus,
     ResearchPhase,
 )
+from app.models.model_trace import ModelTrace
 
 __all__ = [
     "User",
@@ -19,4 +20,5 @@ __all__ = [
     "UserResearchQuota",
     "ResearchTaskStatus",
     "ResearchPhase",
+    "ModelTrace",
 ]

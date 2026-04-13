@@ -29,6 +29,7 @@ async def init_db():
     # Import all models for Beanie initialization
     from app.models.models import User, UserSettings, Session, Message, File, ChatTask
     from app.models.research import ResearchTask, ResearchClarification, UserResearchQuota
+    from app.models.model_trace import ModelTrace
 
     # Initialize Beanie with all document models
     await init_beanie(
@@ -43,6 +44,7 @@ async def init_db():
             ResearchTask,
             ResearchClarification,
             UserResearchQuota,
+            ModelTrace,
         ]
     )
 

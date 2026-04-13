@@ -6,12 +6,45 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging import setup_logging, get_logger
 from app.core.security import get_password_hash
-from app.api.v1 import auth, sessions, chat, users, files, speech, research, research_async
+from app.api.v1 import auth, sessions, chat, users, files, speech, research, research_async, traces
 from app.models import User
+from app.services.otel_mongodb_exporter import mongodb_span_exporter
 
 # Initialize logging
 setup_logging()
 logger = get_logger("app.main")
+
+# ============================================================================
+# Monkey Patch LangChain to handle reasoning_content (百炼 API 特有字段)
+# ============================================================================
+import langchain_openai.chat_models.base as lc_base
+from typing import Mapping, Any, Dict, cast, Type
+from langchain_core.messages import BaseMessageChunk, AIMessageChunk
+
+_original_convert_delta = lc_base._convert_delta_to_message_chunk
+
+def _convert_delta_with_reasoning(
+    _dict: Mapping[str, Any], default_class: Type[BaseMessageChunk]
+) -> BaseMessageChunk:
+    """Patched version that handles reasoning_content"""
+    result = _original_convert_delta(_dict, default_class)
+
+    # 处理百炼 API 的 reasoning_content 字段
+    if isinstance(result, AIMessageChunk) and _dict.get("reasoning_content"):
+        result.additional_kwargs["reasoning_content"] = _dict["reasoning_content"]
+
+    return result
+
+lc_base._convert_delta_to_message_chunk = _convert_delta_with_reasoning
+logger.info("LangChain patched to handle reasoning_content")
+
+# Initialize Traceloop for LLM tracing
+from traceloop.sdk import Traceloop
+Traceloop.init(
+    app_name="ai-chat-platform",
+    exporter=mongodb_span_exporter,
+    disable_batch=True,  # 立即发送 span，便于调试
+)
 
 
 async def create_test_user():
@@ -91,6 +124,7 @@ app.include_router(chat.router, prefix=f"{settings.api_prefix}/chat", tags=["对
 app.include_router(files.router, prefix=f"{settings.api_prefix}/files", tags=["文件"])
 app.include_router(research.router, prefix=f"{settings.api_prefix}/research", tags=["深度研究(同步)"])
 app.include_router(research_async.router, prefix=f"{settings.api_prefix}/research", tags=["深度研究(异步)"])
+app.include_router(traces.router, prefix=f"{settings.api_prefix}/traces", tags=["Trace追踪"])
 
 
 # Health check endpoint
