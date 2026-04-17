@@ -91,13 +91,6 @@ export function getTaskId(task: ResearchTaskListItem): string {
   return task.taskId || task.id || ''
 }
 
-export interface UserQuotaStatus {
-  dailyLimit: number
-  dailyUsed: number
-  dailyRemaining: number
-  totalTasks: number
-}
-
 // ============= Service =============
 
 class ResearchTaskService {
@@ -364,25 +357,6 @@ class ResearchTaskService {
     return data.data
   }
 
-  /**
-   * 获取用户配额状态
-   */
-  async getQuotaStatus(): Promise<UserQuotaStatus> {
-    const response = await fetch(
-      `${apiClient.getBaseURL()}/research/quota`,
-      {
-        headers: this.getHeaders(),
-      }
-    )
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error(error.detail?.message || error.message || `HTTP ${response.status}`)
-    }
-
-    const data = await response.json()
-    return data.data
   }
-}
 
 export const researchTaskService = new ResearchTaskService()

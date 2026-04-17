@@ -2,7 +2,6 @@ from app.models.models import User, UserSettings, Session, Message, File, ChatTa
 from app.models.research import (
     ResearchTask,
     ResearchClarification,
-    UserResearchQuota,
     ResearchTaskStatus,
     ResearchPhase,
 )
@@ -17,7 +16,6 @@ __all__ = [
     "ChatTask",
     "ResearchTask",
     "ResearchClarification",
-    "UserResearchQuota",
     "ResearchTaskStatus",
     "ResearchPhase",
     "ModelTrace",

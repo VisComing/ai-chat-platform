@@ -2,9 +2,8 @@
 Deep Research Async API Endpoints
 深度研究异步任务 API
 """
-import asyncio
 import logging
-from datetime import datetime, date
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Optional, List
 
@@ -13,7 +12,6 @@ from app.core.config import settings
 from app.models.research import (
     ResearchTask,
     ResearchClarification,
-    UserResearchQuota,
     ResearchTaskStatus,
     ResearchPhase,
 )
@@ -25,77 +23,87 @@ from app.schemas.schemas import (
     ResearchTaskResult,
     ResearchTaskListItem,
     ClarificationRequest,
-    UserQuotaStatus,
-    Citation,
     SubTaskProgress,
     ResearchProgress,
+    Citation,
 )
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def run_research_background(task_id: str, query: str, user_id: str, model: Optional[str] = None):
-    """后台执行研究任务（同步函数，使用独立线程运行）"""
-    from app.tasks.research_tasks import run_research_workflow, update_task_status, run_async
+async def run_research_background(
+    task_id: str,
+    query: str,
+    user_id: str,
+    model: Optional[str] = None
+):
+    """后台执行研究任务（异步函数，直接在主事件循环中运行）"""
+    from app.tasks.research_tasks import run_research_workflow, update_task_status
     from app.models.research import ResearchTaskStatus
 
     logger.info(f"[Background Task] Starting research task {task_id}")
 
     try:
         # 更新状态为运行中
-        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING, started_at=datetime.utcnow()))
+        await update_task_status(task_id, ResearchTaskStatus.RUNNING, started_at=datetime.utcnow())
 
         # 执行研究工作流
-        result = run_async(run_research_workflow(
+        result = await run_research_workflow(
             task_id=task_id,
             query=query,
             user_id=user_id,
             model=model,
             skip_clarification=False,
-        ))
+        )
 
         logger.info(f"[Background Task] Research task {task_id} completed: {result.get('status')}")
 
     except Exception as e:
         logger.error(f"[Background Task] Task {task_id} failed: {e}", exc_info=True)
-        run_async(update_task_status(
+        await update_task_status(
             task_id,
             ResearchTaskStatus.FAILED,
             error_message=str(e),
             error_phase="unknown"
-        ))
+        )
 
 
-def resume_research_background(task_id: str, query: str, user_id: str, model: str, clarified_requirements: str):
-    """后台恢复研究任务（同步函数，使用独立线程运行）"""
-    from app.tasks.research_tasks import run_research_workflow, update_task_status, run_async
+async def resume_research_background(
+    task_id: str,
+    query: str,
+    user_id: str,
+    model: str,
+    clarified_requirements: str
+):
+    """后台恢复研究任务（异步函数）"""
+    from app.tasks.research_tasks import run_research_workflow, update_task_status
     from app.models.research import ResearchTaskStatus
 
     logger.info(f"[Background Task] Resuming research task {task_id}")
 
     try:
-        run_async(update_task_status(task_id, ResearchTaskStatus.RUNNING))
+        await update_task_status(task_id, ResearchTaskStatus.RUNNING)
 
-        result = run_async(run_research_workflow(
+        result = await run_research_workflow(
             task_id=task_id,
             query=query,
             user_id=user_id,
             model=model,
             skip_clarification=True,
             clarified_requirements=clarified_requirements,
-        ))
+        )
 
         logger.info(f"[Background Task] Research task {task_id} resumed and completed")
 
     except Exception as e:
         logger.error(f"[Background Task] Task {task_id} resume failed: {e}", exc_info=True)
-        run_async(update_task_status(
+        await update_task_status(
             task_id,
             ResearchTaskStatus.FAILED,
             error_message=str(e),
             error_phase="clarify"
-        ))
+        )
 
 
 @router.post("/tasks", response_model=ApiResponse[ResearchTaskCreated])
@@ -450,46 +458,3 @@ async def list_user_tasks(
         ))
 
     return ApiResponse(success=True, data=task_list)
-
-
-@router.get("/quota", response_model=ApiResponse[UserQuotaStatus])
-async def get_user_quota(
-    user_id: str = Depends(get_current_user_id),
-):
-    """
-    获取用户配额状态
-    """
-    logger.debug(f"[Research API] User {user_id} querying quota")
-
-    quota = await get_or_create_quota(user_id)
-
-    # 重置每日配额（如果需要）
-    today = date.today()
-    if quota.last_reset_date.date() != today:
-        quota.daily_used = 0
-        quota.last_reset_date = datetime.utcnow()
-        await quota.save()
-
-    return ApiResponse(
-        success=True,
-        data=UserQuotaStatus(
-            dailyLimit=quota.daily_limit,
-            dailyUsed=quota.daily_used,
-            dailyRemaining=quota.daily_limit - quota.daily_used,
-            totalTasks=quota.total_tasks,
-        )
-    )
-
-
-async def get_or_create_quota(user_id: str) -> UserResearchQuota:
-    """获取或创建用户配额记录"""
-    quota = await UserResearchQuota.find_one(UserResearchQuota.user_id == user_id)
-
-    if not quota:
-        quota = UserResearchQuota(
-            user_id=user_id,
-            daily_limit=settings.deep_research_daily_limit,
-        )
-        await quota.insert()
-
-    return quota

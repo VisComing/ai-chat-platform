@@ -2,11 +2,9 @@
 Deep Research Tasks
 深度研究异步任务执行
 """
-import asyncio
 import json
 import logging
 import os
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -16,32 +14,6 @@ from app.models.research import ResearchTask, ResearchTaskStatus, ResearchPhase,
 from app.services.deer_flow_service import deer_flow_service
 
 logger = logging.getLogger(__name__)
-
-
-def run_async(coro):
-    """在同步上下文中运行异步函数，确保在新线程中使用新的事件循环"""
-    result = None
-    exception = None
-
-    def run_in_thread():
-        nonlocal result, exception
-        # 在新线程中创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(coro)
-        except Exception as e:
-            exception = e
-        finally:
-            loop.close()
-
-    thread = threading.Thread(target=run_in_thread)
-    thread.start()
-    thread.join(timeout=300)  # 5分钟超时
-
-    if exception:
-        raise exception
-    return result
 
 
 async def update_task_status(

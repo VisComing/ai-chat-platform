@@ -17,7 +17,7 @@ from app.services.deer_flow.state import (
 )
 from app.services.search_service import search_service, SearchResult
 from app.services.deep_research_graph import create_llm, parse_llm_json_response
-from app.services.deep_research_prompts import EVALUATE_PROMPT, CURRENT_DATE
+from app.services.deep_research_prompts import EVALUATE_PROMPT, get_current_date
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -254,7 +254,7 @@ class SubAgent:
             current_topic=topic,
             search_query=query,
             search_results=formatted,
-            current_date=CURRENT_DATE
+            current_date=get_current_date()
         )
 
         response = await llm.ainvoke([{"role": "system", "content": prompt}])

@@ -108,20 +108,18 @@ ai-chat-platform/
 
 ## 开发指南
 
-### 前端启动
+### 项目启动
+使用 Makefile 管理服务（自动处理端口冲突）：
 ```bash
-cd frontend
-npm install
-npm run dev  # http://localhost:3000
+make dev        # 启动前后端（清理端口后启动）
+make backend    # 只启动后端
+make frontend   # 只启动前端
+make stop       # 停止所有服务
+make restart    # 重启
+make health     # 检查状态
 ```
-
-### 后端启动
-后端使用 uv 管理依赖
-```bash
-cd backend
-uv sync                    # 安装依赖
-uv run uvicorn app.main:app --reload  # http://localhost:8000
-```
+- 后端: http://localhost:8000
+- 前端: http://localhost:3000
 
 ## 代码风格约定
 
