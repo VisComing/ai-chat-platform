@@ -330,7 +330,7 @@ class ResearchTaskCreated(BaseModel):
 
 class ResearchTaskStatus(BaseModel):
     """研究任务状态响应"""
-    taskId: str = Field(alias="id")
+    taskId: str
     query: Optional[str] = None  # 研究查询内容
     status: str
     phase: str
@@ -369,7 +369,7 @@ class ResearchTaskResult(BaseModel):
 
 class ResearchTaskListItem(BaseModel):
     """研究任务列表项"""
-    taskId: str = Field(alias="id")
+    taskId: str
     query: str
     status: str
     phase: str
@@ -380,11 +380,3 @@ class ResearchTaskListItem(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
-
-
-class UserQuotaStatus(BaseModel):
-    """用户配额状态"""
-    dailyLimit: int
-    dailyUsed: int
-    dailyRemaining: int
-    totalTasks: int

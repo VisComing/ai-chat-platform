@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # AI Services - Alibaba Cloud Bailian Platform
     bailian_api_key: str = ""  # Required: Set via BAILIAN_API_KEY env var
     bailian_base_url: str = "https://coding.dashscope.aliyuncs.com/v1"
-    default_model: str = "qwen3.5-plus"
+    default_model: str = "deepseek-chat"
     max_tokens: int = 4096
     default_temperature: float = 0.7
 
@@ -51,33 +51,16 @@ class Settings(BaseSettings):
 
     # Supported models
     supported_models: list[str] = [
-        "qwen3.5-plus",
-        "qwen3-max-2026-01-23",
-        "qwen3-coder-next",
-        "qwen3-coder-plus",
-        "glm-5",
-        "glm-4.7",
-        "kimi-k2.5",
-        "MiniMax-M2.5",
         "deepseek-chat",
         "deepseek-reasoner",
     ]
 
     # Model capabilities
     # Models that support visual understanding (multimodal image input)
-    multimodal_models: list[str] = [
-        "qwen3.5-plus",
-        "kimi-k2.5",
-    ]
+    multimodal_models: list[str] = []
 
     # Models that support deep thinking (reasoning content)
     thinking_models: list[str] = [
-        "qwen3.5-plus",
-        "qwen3-max-2026-01-23",
-        "glm-5",
-        "glm-4.7",
-        "kimi-k2.5",
-        "MiniMax-M2.5",
         "deepseek-reasoner",
     ]
     
@@ -97,12 +80,11 @@ class Settings(BaseSettings):
     deep_research_max_time_seconds: int = 600  # 总研究时间上限（10分钟）
     deep_research_enable_clarification: bool = True  # 是否启用范围澄清
     deep_research_target_score: float = 0.8  # 信息充足的目标评估分数
-    deep_research_default_model: str = "qwen3-max-2026-01-23"  # 推荐使用推理能力强的模型
-    deep_research_daily_limit: int = 5  # 用户每日深度研究次数限制
+    deep_research_default_model: str = "deepseek-reasoner"  # 推荐使用推理能力强的模型
     deep_research_poll_interval: int = 3  # 前端轮询间隔（秒）
 
     # Title Generation - Use lightweight model for cost optimization
-    title_generation_model: str = "MiniMax-M2.5"  # 轻量模型，降低成本
+    title_generation_model: str = "deepseek-chat"  # 轻量模型，降低成本
 
     # Sandbox Settings (Local Docker)
     sandbox_container_image: str = "python:3.12-slim"

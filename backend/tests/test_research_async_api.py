@@ -10,7 +10,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.database import init_db, close_db
 from app.models import User
-from app.models.research import ResearchTask, ResearchClarification, UserResearchQuota, ResearchTaskStatus
+from app.models.research import ResearchTask, ResearchClarification, ResearchTaskStatus
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -75,35 +75,6 @@ class TestResearchTaskAPI:
         assert data["success"] is True
         assert "taskId" in data["data"]
         assert data["data"]["status"] == ResearchTaskStatus.PENDING.value
-
-    @pytest.mark.asyncio
-    async def test_create_task_quota_exceeded(self, client: AsyncClient, auth_headers):
-        """测试配额超限"""
-        # Get user from database
-        user = await User.find_one(User.username == "test_research_user")
-        user_id = user.id
-
-        # Set quota to exhausted
-        quota = UserResearchQuota(
-            user_id=user_id,
-            daily_limit=5,
-            daily_used=5,
-            last_reset_date=datetime.utcnow()
-        )
-        await quota.insert()
-
-        # Try to create task
-        response = await client.post(
-            "/api/v1/research/tasks",
-            headers=auth_headers,
-            json={"query": "测试问题"}
-        )
-
-        assert response.status_code == 429
-        data = response.json()
-        assert "QUOTA_EXCEEDED" in data["detail"]["code"]
-
-        await quota.delete()
 
     @pytest.mark.asyncio
     async def test_get_task_status(self, client: AsyncClient, auth_headers):
@@ -182,21 +153,6 @@ class TestResearchTaskAPI:
         assert data["success"] is True
         assert len(data["data"]) >= 3
 
-    @pytest.mark.asyncio
-    async def test_get_quota_status(self, client: AsyncClient, auth_headers):
-        """测试获取配额状态"""
-        response = await client.get(
-            "/api/v1/research/quota",
-            headers=auth_headers
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "dailyLimit" in data["data"]
-        assert "dailyUsed" in data["data"]
-        assert "dailyRemaining" in data["data"]
-
 
 class TestClarificationFlow:
     """澄清流程测试"""
@@ -274,34 +230,3 @@ class TestTaskResult:
         data = response.json()
         assert data["success"] is True
         assert data["data"]["reportUrl"] is not None
-
-
-class TestQuotaReset:
-    """配额重置测试"""
-
-    @pytest.mark.asyncio
-    async def test_quota_daily_reset(self, client: AsyncClient, auth_headers):
-        """测试每日配额重置"""
-        # Get user ID
-        user = await User.find_one(User.username == "test_research_user")
-        user_id = user.id
-
-        # Set yesterday's reset date
-        quota = UserResearchQuota(
-            user_id=user_id,
-            daily_limit=5,
-            daily_used=5,
-            last_reset_date=datetime(2020, 1, 1)  # Past date
-        )
-        await quota.insert()
-
-        # Query quota (should auto-reset)
-        response = await client.get(
-            "/api/v1/research/quota",
-            headers=auth_headers
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["data"]["dailyUsed"] == 0  # Should have reset
-        assert data["data"]["dailyRemaining"] == data["data"]["dailyLimit"]

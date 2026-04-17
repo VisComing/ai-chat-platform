@@ -128,35 +128,10 @@ class ResearchClarification(Document):
         populate_by_name = True
 
 
-class UserResearchQuota(Document):
-    """用户研究配额模型"""
-
-    id: str = Field(default_factory=generate_uuid, alias="_id")
-    user_id: Indexed(str, unique=True)  # Primary key equivalent
-
-    daily_limit: int = 5  # 每日限制次数
-    daily_used: int = 0   # 今日已使用次数
-    last_reset_date: datetime = Field(default_factory=datetime.utcnow)  # 上次重置日期
-    total_tasks: int = 0  # 总任务数
-
-    @field_validator("id", mode="before")
-    @classmethod
-    def validate_id(cls, v):
-        return objectid_to_str(v)
-
-    class Settings:
-        name = "user_research_quota"
-        indexes = ["user_id"]
-
-    class Config:
-        populate_by_name = True
-
-
 # Export all models
 __all__ = [
     "ResearchTask",
     "ResearchClarification",
-    "UserResearchQuota",
     "ResearchTaskStatus",
     "ResearchPhase",
     "generate_uuid",

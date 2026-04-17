@@ -3,8 +3,10 @@ Deep Research Prompts - 各阶段专用Prompt模板
 """
 from datetime import datetime
 
-# 当前日期
-CURRENT_DATE = datetime.now().strftime("%Y年%m月%d日")
+
+def get_current_date() -> str:
+    """动态获取当前日期"""
+    return datetime.now().strftime("%Y年%m月%d日")
 
 
 # ==================== 范围澄清阶段 ====================
