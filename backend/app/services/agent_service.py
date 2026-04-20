@@ -23,6 +23,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.pregel import Pregel
 from traceloop.sdk import Traceloop
 from traceloop.sdk.tracing.tracing import set_workflow_name
+from openai import AsyncOpenAI
 
 from app.core.config import get_settings
 from app.services.search_service import search_service, SearchResult
@@ -424,6 +425,7 @@ class AgentService:
         直接调用 LLM（不使用 Agent/工具）
 
         用于 enable_search=False 的情况，避免空 tools 数组导致的 API 错误。
+        对于 DeepSeek 模型，使用原生 OpenAI SDK 以正确获取 reasoning_content。
 
         Args:
             messages: 对话历史
@@ -433,10 +435,17 @@ class AgentService:
         Yields:
             SSE 事件字典
         """
+        start_time = time.time()
+
+        # DeepSeek 模型使用原生 OpenAI SDK，以正确获取 reasoning_content
+        if model in DEEPSEEK_MODELS:
+            async for event in self._stream_deepseek_direct(messages, model):
+                yield event
+            return
+
+        # 其他模型使用 LangChain
         llm = self._create_llm(model, enable_thinking=enable_thinking)
         lc_messages = self._convert_to_lc_messages(messages, model)
-
-        start_time = time.time()
 
         logger.info(f"[Agent] Direct LLM call for model: {model}, thinking={enable_thinking}")
 
@@ -485,6 +494,100 @@ class AgentService:
 
         except Exception as e:
             logger.error(f"[Agent] Direct LLM error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": {
+                    "type": "error",
+                    "content": str(e),
+                }
+            }
+
+    async def _stream_deepseek_direct(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        使用原生 OpenAI SDK 流式调用 DeepSeek API
+
+        正确处理 reasoning_content 和 content 两个字段。
+
+        Args:
+            messages: 对话历史
+            model: DeepSeek 模型名称
+
+        Yields:
+            SSE 事件字典
+        """
+        start_time = time.time()
+
+        client = AsyncOpenAI(
+            api_key=self.settings.deepseek_api_key,
+            base_url=self.settings.deepseek_base_url,
+        )
+
+        # 转换消息格式
+        openai_messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, dict):
+                content = content.get("text", str(content))
+            openai_messages.append({"role": role, "content": content})
+
+        logger.info(f"[Agent] Direct DeepSeek call for model: {model}")
+
+        try:
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=openai_messages,
+                temperature=self.settings.default_temperature,
+                max_tokens=self.settings.max_tokens,
+                stream=True,
+            )
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if not delta:
+                    continue
+
+                # 处理 reasoning_content（思考过程）
+                reasoning_content = getattr(delta, "reasoning_content", None) or ""
+                if reasoning_content and reasoning_content.strip():
+                    yield {
+                        "event": "thinking",
+                        "data": {
+                            "type": "thinking",
+                            "content": reasoning_content,
+                        }
+                    }
+
+                # 处理 content（最终回复）
+                content = delta.content or ""
+                if content and content.strip():
+                    yield {
+                        "event": "text",
+                        "data": {
+                            "type": "text",
+                            "content": content,
+                        }
+                    }
+
+            # 发送完成事件
+            yield {
+                "event": "complete",
+                "data": {
+                    "type": "complete",
+                    "search_used": False,
+                    "sources": [],
+                    "citations": [],
+                    "iterations": 0,
+                    "duration": time.time() - start_time,
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"[Agent] DeepSeek direct error: {e}", exc_info=True)
             yield {
                 "event": "error",
                 "data": {
