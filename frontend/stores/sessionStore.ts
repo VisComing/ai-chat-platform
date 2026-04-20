@@ -177,6 +177,7 @@ export const useSessionStore = create<SessionState>()(
           set({
             sessions,
             isLoading: false,
+            isInitialized: true,  // 标记初始化完成
           })
         } catch (error) {
           set({

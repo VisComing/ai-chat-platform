@@ -100,15 +100,20 @@ export function ChatLayout() {
   useEffect(() => {
     const init = async () => {
       try {
-        // 从 localStorage 读取 token
-        let storedToken: string | null = null
-        try {
-          const stored = localStorage.getItem('auth-storage')
-          if (stored) {
-            const parsed = JSON.parse(stored)
-            storedToken = parsed?.state?.accessToken || null
-          }
-        } catch {}
+        // 先检查 store 中是否有 token（刚登录的情况）
+        let storeToken = useAuthStore.getState().accessToken
+
+        // 如果 store 中没有，再从 localStorage 读取
+        let storedToken: string | null = storeToken || null
+        if (!storedToken) {
+          try {
+            const stored = localStorage.getItem('auth-storage')
+            if (stored) {
+              const parsed = JSON.parse(stored)
+              storedToken = parsed?.state?.accessToken || null
+            }
+          } catch {}
+        }
 
         if (storedToken) {
           // 有缓存 token：并行执行认证验证和会话加载
