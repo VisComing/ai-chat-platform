@@ -14,66 +14,6 @@ export interface AIModel {
 }
 
 export const AVAILABLE_MODELS: AIModel[] = [
-  // 千问系列
-  {
-    id: 'qwen3.5-plus',
-    name: 'Qwen 3.5 Plus',
-    provider: '千问',
-    capabilities: ['文本生成', '深度思考', '视觉理解'],
-    description: '通用的强大模型，支持多种任务',
-  },
-  {
-    id: 'qwen3-max-2026-01-23',
-    name: 'Qwen 3 Max',
-    provider: '千问',
-    capabilities: ['文本生成', '深度思考'],
-    description: '最强推理能力，适合复杂任务',
-  },
-  {
-    id: 'qwen3-coder-next',
-    name: 'Qwen 3 Coder Next',
-    provider: '千问',
-    capabilities: ['代码'],
-    description: '代码专用模型，编程能力强',
-  },
-  {
-    id: 'qwen3-coder-plus',
-    name: 'Qwen 3 Coder Plus',
-    provider: '千问',
-    capabilities: ['代码'],
-    description: '代码助手，支持多种语言',
-  },
-  // 智谱系列
-  {
-    id: 'glm-5',
-    name: 'GLM-5',
-    provider: '智谱',
-    capabilities: ['文本生成', '深度思考'],
-    description: '智谱最新模型，综合能力强',
-  },
-  {
-    id: 'glm-4.7',
-    name: 'GLM-4.7',
-    provider: '智谱',
-    capabilities: ['文本生成', '深度思考'],
-    description: '智谱稳定版本，性能可靠',
-  },
-  // Kimi系列
-  {
-    id: 'kimi-k2.5',
-    name: 'Kimi K2.5',
-    provider: 'Kimi',
-    capabilities: ['文本生成', '深度思考', '视觉理解'],
-    description: '月之暗面出品，长文本能力强',
-  },
-  // MiniMax系列
-  {
-    id: 'MiniMax-M2.5',
-    name: 'MiniMax M2.5',
-    provider: 'MiniMax',
-    capabilities: ['文本生成', '深度思考'],
-    description: 'MiniMax旗舰模型，创意能力强',
-  },
   // DeepSeek系列
   {
     id: 'deepseek-chat',
@@ -93,21 +33,11 @@ export const AVAILABLE_MODELS: AIModel[] = [
 
 // Models that support deep thinking (showing reasoning process)
 export const THINKING_MODELS = [
-  'qwen3.5-plus',
-  'qwen3-max',
-  'qwen3-max-2026-01-23',
-  'glm-5',
-  'glm-4.7',
-  'kimi-k2.5',
-  'MiniMax-M2.5',
   'deepseek-reasoner',
 ]
 
 // Models that support visual understanding (multimodal image input)
-export const MULTIMODAL_MODELS = [
-  'qwen3.5-plus',
-  'kimi-k2.5',
-]
+export const MULTIMODAL_MODELS = []
 
 // Check if a model supports deep thinking
 export function isThinkingModel(modelId: string): boolean {
@@ -149,14 +79,6 @@ export function ModelSelector({
 
   const getProviderIcon = (provider: string) => {
     switch (provider) {
-      case '千问':
-        return <Sparkles className="w-4 h-4" />
-      case '智谱':
-        return <Brain className="w-4 h-4" />
-      case 'Kimi':
-        return <Eye className="w-4 h-4" />
-      case 'MiniMax':
-        return <Code className="w-4 h-4" />
       case 'DeepSeek':
         return <Brain className="w-4 h-4" />
       default:

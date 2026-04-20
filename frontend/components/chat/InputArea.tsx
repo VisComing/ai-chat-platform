@@ -49,7 +49,7 @@ export function InputArea({
   maxLength = 4000,
   showSettings = false,
   showModelSelector = false,
-  selectedModel = 'qwen3.5-plus',
+  selectedModel = 'deepseek-chat',
   onModelChange,
   onSettingsClick,
   enableSearch = false,

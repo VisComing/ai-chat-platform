@@ -43,7 +43,7 @@ export const useChatStore = create<ChatState>()(
       isLoading: false,
       streamingMessageId: null,
       error: null,
-      selectedModel: 'qwen3.5-plus',
+      selectedModel: 'deepseek-chat',
       enableSearch: false,  // Default: Web search DISABLED
       enableThinking: false,  // Default: Deep thinking mode DISABLED
       onSessionCreated: undefined,

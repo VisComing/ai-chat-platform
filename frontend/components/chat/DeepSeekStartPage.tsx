@@ -352,7 +352,7 @@ export function DeepSeekStartPage({
           <div className="flex items-center gap-2">
             <FeatureButtons
               mode={mode}
-              selectedModel={selectedModel || 'qwen3.5-plus'}
+              selectedModel={selectedModel || 'deepseek-chat'}
               enableDeepThinking={enableDeepThinking}
               enableSearch={enableSearch}
               enableDeepResearch={enableDeepResearch}

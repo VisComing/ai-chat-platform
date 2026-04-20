@@ -181,7 +181,7 @@ export function ChatContainer({ className }: ChatContainerProps) {
       (messageContent.type === 'mixed' && messageContent.parts?.some(p => p.type === 'image'))
 
     if (hasImages && !isMultimodalModel(selectedModel)) {
-      toast.error('当前模型不支持图片理解，请切换到 qwen3.5-plus 或 kimi-k2.5')
+      toast.error('当前模型不支持图片理解')
       return
     }
 
